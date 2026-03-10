@@ -1,0 +1,12 @@
+{
+  "display_name": "Aspect: Destinia",
+  "loading_order": 25,
+  "requires": [],
+  "optional": [],
+  "minimum_client_version": "1.13.2",
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Vectricity",
+  "version": "0.0.1",
+  "homePage": "https://github.com/Vectricity/st-aspect-destinia"
+}
