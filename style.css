@@ -1,0 +1,95 @@
+#aspect_destinia_settings .aspect-destinia-settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#aspect_destinia_settings .aspect-destinia-settings-content > label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#aspect_destinia_settings .aspect-destinia-hero-card,
+#aspect_destinia_settings .aspect-destinia-info-card {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 88%, transparent);
+    padding: 12px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+#aspect_destinia_settings .aspect-destinia-hero-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+#aspect_destinia_settings .aspect-destinia-muted {
+    opacity: 0.8;
+    font-size: 0.92rem;
+}
+
+#aspect_destinia_settings .aspect-destinia-status-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: rgba(255, 255, 255, 0.05);
+    white-space: nowrap;
+    font-size: 0.9rem;
+}
+
+#aspect_destinia_settings .aspect-destinia-two-col {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+#aspect_destinia_settings .aspect-destinia-info-label {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#aspect_destinia_settings .aspect-destinia-info-value {
+    font-size: 0.95rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+#aspect_destinia_settings .textarea_compact {
+    min-height: 84px;
+    resize: vertical;
+}
+
+#aspect_destinia_settings .textarea_large {
+    min-height: 240px;
+    resize: vertical;
+    font-family: monospace;
+    line-height: 1.35;
+}
+
+#aspect_destinia_settings .menu_button {
+    min-width: 0;
+}
+
+#aspect_destinia_settings .text_pole {
+    width: 100%;
+}
+
+#aspect_destinia_settings .aspect-destinia-dirty {
+    color: var(--warning);
+    font-weight: 700;
+}
+
+#aspect_destinia_settings .aspect-destinia-saved {
+    color: var(--SmartThemeQuoteColor);
+}
+
+@media screen and (max-width: 900px) {
+    #aspect_destinia_settings .aspect-destinia-two-col {
+        grid-template-columns: 1fr;
+    }
+}
