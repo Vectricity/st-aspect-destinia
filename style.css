@@ -1,95 +1,142 @@
-#aspect_destinia_settings .aspect-destinia-settings-content {
+#aspect_destinia_root .aspect-destinia-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    padding-top: 8px;
 }
 
-#aspect_destinia_settings .aspect-destinia-settings-content > label {
+#aspect_destinia_root .aspect-destinia-card {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 14px;
+    padding: 12px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, transparent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
+}
+
+#aspect_destinia_root .aspect-destinia-toolbar,
+#aspect_destinia_root .aspect-destinia-actions,
+#aspect_destinia_root .aspect-destinia-inline {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+#aspect_destinia_root .aspect-destinia-grid {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+#aspect_destinia_root .aspect-destinia-grid.two {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+#aspect_destinia_root .aspect-destinia-grid.three {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+#aspect_destinia_root .aspect-destinia-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
-}
-
-#aspect_destinia_settings .aspect-destinia-hero-card,
-#aspect_destinia_settings .aspect-destinia-info-card {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 88%, transparent);
-    padding: 12px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-}
-
-#aspect_destinia_settings .aspect-destinia-hero-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin-bottom: 4px;
-}
-
-#aspect_destinia_settings .aspect-destinia-muted {
-    opacity: 0.8;
-    font-size: 0.92rem;
-}
-
-#aspect_destinia_settings .aspect-destinia-status-chip {
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    background: rgba(255, 255, 255, 0.05);
-    white-space: nowrap;
-    font-size: 0.9rem;
-}
-
-#aspect_destinia_settings .aspect-destinia-two-col {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-}
-
-#aspect_destinia_settings .aspect-destinia-info-label {
-    font-size: 0.8rem;
-    opacity: 0.7;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-#aspect_destinia_settings .aspect-destinia-info-value {
-    font-size: 0.95rem;
-    line-height: 1.4;
-    word-break: break-word;
-}
-
-#aspect_destinia_settings .textarea_compact {
-    min-height: 84px;
-    resize: vertical;
-}
-
-#aspect_destinia_settings .textarea_large {
-    min-height: 240px;
-    resize: vertical;
-    font-family: monospace;
-    line-height: 1.35;
-}
-
-#aspect_destinia_settings .menu_button {
     min-width: 0;
 }
 
-#aspect_destinia_settings .text_pole {
+#aspect_destinia_root .aspect-destinia-grow {
+    flex: 1 1 280px;
+}
+
+#aspect_destinia_root .aspect-destinia-label,
+#aspect_destinia_root .aspect-destinia-section-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    opacity: 0.95;
+}
+
+#aspect_destinia_root input[type="text"],
+#aspect_destinia_root input[type="number"],
+#aspect_destinia_root select,
+#aspect_destinia_root textarea {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: var(--black50a, rgba(0,0,0,0.18));
+    color: var(--SmartThemeBodyColor);
+    padding: 10px 12px;
+    box-sizing: border-box;
+}
+
+#aspect_destinia_root textarea {
+    min-height: 120px;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+#aspect_destinia_root .aspect-destinia-code {
+    min-height: 260px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: pre;
+}
+
+#aspect_destinia_root .aspect-destinia-code.tall {
+    min-height: 320px;
+}
+
+#aspect_destinia_root .aspect-destinia-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+}
+
+#aspect_destinia_root .aspect-destinia-stat {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+}
+
+#aspect_destinia_root .aspect-destinia-stat-label {
+    font-size: 0.8rem;
+    opacity: 0.75;
+    margin-bottom: 4px;
+}
+
+#aspect_destinia_root .aspect-destinia-stat-value {
+    font-size: 0.95rem;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+#aspect_destinia_root .aspect-destinia-status-reason,
+#aspect_destinia_root .aspect-destinia-empty {
+    margin-top: 10px;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--SmartThemeBorderColor);
+    line-height: 1.45;
+}
+
+#aspect_destinia_root .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+}
+
+#aspect_destinia_root .sliders input[type="range"] {
     width: 100%;
 }
 
-#aspect_destinia_settings .aspect-destinia-dirty {
-    color: var(--warning);
+#aspect_destinia_root .menu_button_primary {
     font-weight: 700;
 }
 
-#aspect_destinia_settings .aspect-destinia-saved {
-    color: var(--SmartThemeQuoteColor);
+#aspect_destinia_root .menu_button_danger {
+    border-color: rgba(220, 80, 80, 0.45);
 }
 
-@media screen and (max-width: 900px) {
-    #aspect_destinia_settings .aspect-destinia-two-col {
-        grid-template-columns: 1fr;
-    }
+#aspect_destinia_root .inline-drawer-header b {
+    letter-spacing: 0.02em;
 }

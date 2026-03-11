@@ -1,12 +1,15 @@
 {
   "display_name": "Aspect: Destinia",
-  "loading_order": 25,
+  "loading_order": 35,
   "requires": [],
   "optional": [],
-  "minimum_client_version": "1.13.2",
+  "dependencies": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "Vectricity",
-  "version": "0.0.1",
-  "homePage": "https://github.com/Vectricity/st-aspect-destinia"
+  "author": "OpenAI",
+  "version": "0.2.0",
+  "homePage": "https://github.com/Vectricity/st-aspect-destinia",
+  "auto_update": false,
+  "minimum_client_version": "1.12.0",
+  "generate_interceptor": "aspectDestiniaInterceptor"
 }
