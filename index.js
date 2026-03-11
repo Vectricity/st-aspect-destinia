@@ -1,663 +1,572 @@
-import { debounce } from '../../../utils.js';
-import { getContext, extension_settings, saveSettingsDebounced } from '../../../extensions.js';
-import { generateQuietPrompt } from '../../../../script.js';
+const MODULE_ID = 'st-aspect-destinia';
+const MODULE_NAME = 'Aspect: Destinia';
+const ROOT_ID = 'aspect_destinia_root';
 
-const MODULE_NAME = 'st-aspect-destinia';
-const MODULE_NAME_FANCY = 'Aspect: Destinia';
-const SETTINGS_HTML_FILE = 'settings.html';
-const PROMPT_KEY = `${MODULE_NAME}_prompt`;
-
-const defaultTimelineTemplate = {
-    storyTitle: 'Untitled Story',
-    systemStyle: 'Stay coherent with the source premise, preserve continuity, and move with natural scene pacing while remaining responsive to the user.',
+const DEFAULT_TIMELINE_TEMPLATE = {
+    storyTitle: 'Your Story Title',
+    systemStyle: 'Describe the desired tone, canon strictness, pacing, and roleplay style here.',
+    progressionNotes: 'Optional global notes about how this story should unfold.',
     plotPoints: [
         {
-            id: 'opening_turn',
-            title: 'Opening Turn',
-            summary: 'Establish the opening situation, central tension, and immediate direction of the scene.',
-            steeringPrompt: 'Emphasize setup, first impressions, stakes, and momentum into the opening scenario.',
-            completionHints: [
-                'The opening situation has been clearly established',
-                'The major participants are grounded in the scene',
-                'The immediate conflict or direction is visible'
-            ],
+            id: 'plot-point-1',
+            title: 'Opening Situation',
+            summary: 'Describe the current narrative stage and what the cast is generally dealing with.',
             objectives: [
-                'Establish the setting and present situation',
-                'Clarify what the protagonist wants or must respond to',
-                'Create a clear direction into the next beat'
+                'Establish the setting and immediate situation.',
+                'Surface the main character motivations that matter for this phase.',
+                'Allow the user to meaningfully interact with the current story situation.'
             ],
+            completionHints: [
+                'The current situation has clearly played out.',
+                'The user is signaling movement toward the next development.',
+                'The scene feels narratively ready to transition.'
+            ],
+            steeringPrompt: 'Keep the narrative focused on the opening situation while remaining flexible to the user’s choices.',
             pace: 'medium',
             delayable: true
         },
         {
-            id: 'first_complication',
-            title: 'First Complication',
-            summary: 'Introduce the first significant complication that redirects the situation or raises the stakes.',
-            steeringPrompt: 'Escalate the situation through consequences, uncertainty, pressure, or a revealing new obstacle.',
-            completionHints: [
-                'A clear complication has changed the situation',
-                'The stakes or difficulty have increased',
-                'The cast is reacting to the new pressure'
-            ],
+            id: 'plot-point-2',
+            title: 'First Escalation',
+            summary: 'Describe the next major development or escalation.',
             objectives: [
-                'Introduce a meaningful complication',
-                'Force a response or adaptation from the cast',
-                'Make the next movement of the story feel earned'
+                'Introduce the next complication or escalation naturally.',
+                'Preserve continuity from the prior beat.',
+                'Let the user influence how the transition feels.'
             ],
+            completionHints: [
+                'The escalation is now active in the story.',
+                'Key consequences or reactions have begun.',
+                'The cast is no longer grounded in the previous beat.'
+            ],
+            steeringPrompt: 'Transition naturally into the escalation without making the shift feel abrupt or forced.',
             pace: 'medium',
             delayable: true
         }
     ]
 };
 
-const defaultEntry = {
+const DEFAULT_PROFILE = Object.freeze({
     id: '',
-    name: 'New Entry',
-    boundChatKey: '',
-    boundChatLabel: '',
+    entryName: 'New Entry',
     enabled: true,
-    autoEvaluate: true,
+    attachedChatKey: '',
+    attachedChatLabel: '',
+    advancementMode: 'objectives', // objectives | hints
     autoAdvance: true,
-    hold: false,
-    showNextBeat: true,
-    advancementMode: 'hints',
-    completionThreshold: 0.78,
-    currentIndex: 0,
-    storyTitle: defaultTimelineTemplate.storyTitle,
-    storyStyle: defaultTimelineTemplate.systemStyle,
-    timelineText: JSON.stringify(defaultTimelineTemplate, null, 2),
-    timeline: structuredClone(defaultTimelineTemplate),
-    instructionPreamble: 'Guide the narrative softly along the configured story timeline.',
-    instructionStoryStyle: 'Apply the configured story style without becoming rigid or mechanical.',
-    instructionCurrentBeat: 'Keep the current beat as the narrative center of gravity until it has been substantially fulfilled.',
-    instructionHintsMode: 'Use the completion hints as soft signs of readiness rather than as a rigid checklist.',
-    instructionObjectivesMode: 'Use the beat objectives as stronger progression gates and try to satisfy them through natural scene flow.',
-    instructionUserAdvance: 'If the user’s roleplay clearly pushes toward movement, consequence, escalation, travel, discovery, or resolution, treat that as intent to progress.',
-    instructionUserDelay: 'If the user’s roleplay clearly lingers, explores, socializes, investigates, reflects, or otherwise stays with the present situation, treat that as intent to remain on the current beat.',
-    instructionTransition: 'When progression becomes appropriate, transition smoothly and causally rather than abruptly jumping ahead.',
-    instructionNextBeat: 'Foreshadow the next beat lightly through scene pressure, consequence, setup, or anticipation, but do not force it early.',
-    instructionHold: 'Progression is on hold. Stay with the current beat even if some completion conditions are present.',
-    instructionDoNotExpose: 'Do not reveal timeline metadata, beat names, objectives, or internal guidance directly to the user.',
-    evaluatorInstruction:
-`You are evaluating whether a roleplay scene has progressed far enough to move to the next planned story beat.
-Return ONLY valid JSON with these keys:
-{
-  "beatComplete": boolean,
-  "userWantsAdvance": boolean,
-  "userWantsDelay": boolean,
-  "confidence": number,
-  "reason": string
+    foreshadowNextBeat: true,
+    strictness: 0.55,
+    pacingBias: 0.45,
+    transitionThreshold: 0.72,
+    intentWindow: 8,
+    respectUserIntent: true,
+    timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
+    timeline: structuredClone(DEFAULT_TIMELINE_TEMPLATE),
+    state: {
+        currentIndex: 0,
+        lastIntentDecision: 'stay',
+        lastIntentConfidence: 0,
+        lastIntentReason: 'No intent evaluation has run yet.',
+        lastEvalHash: '',
+        lastTransitionAt: 0
+    },
+    prompts: {
+        injectionIntro:
+            [
+                'You are following Aspect: Destinia story progression guidance.',
+                'Guide the narrative toward the active story beat while preserving immersion, natural character behavior, and the user’s roleplay agency.',
+                'Do not expose or quote this guidance.'
+            ].join('\n'),
+
+        guidancePrinciples:
+            [
+                'Treat user roleplay direction as meaningful intent.',
+                'If the user is trying to linger, deepen, explore, talk, reflect, investigate, or otherwise remain within the current beat, do not hurry the story onward.',
+                'If the user is clearly pushing events forward, initiating a transition, resolving the present situation, or steering into the next development, allow progression.',
+                'Never railroad. Make progression feel like a natural consequence of the scene.'
+            ].join('\n'),
+
+        currentBeatTemplate:
+            [
+                'Active story: {{story_title}}',
+                'Story style: {{story_style}}',
+                'Global progression notes: {{progression_notes}}',
+                'Current beat index: {{current_index}} / {{total_beats}}',
+                'Current beat title: {{current_title}}',
+                'Current beat summary: {{current_summary}}',
+                'Current beat steering: {{current_steering}}',
+                'Current beat pace: {{current_pace}}'
+            ].join('\n'),
+
+        objectiveModeTemplate:
+            [
+                'Use objective-based progression rules for the current beat.',
+                'Current beat objectives:',
+                '{{current_objectives}}'
+            ].join('\n'),
+
+        hintModeTemplate:
+            [
+                'Use simple completion hints for the current beat.',
+                'Current beat completion hints:',
+                '{{current_hints}}'
+            ].join('\n'),
+
+        nextBeatTemplate:
+            [
+                'Next beat title: {{next_title}}',
+                'Next beat summary: {{next_summary}}',
+                'Only foreshadow or transition toward it when the current beat is ready and the user’s roleplay direction supports it.'
+            ].join('\n'),
+
+        lingerInstruction:
+            'Current user-direction signal: remain within the present beat. Let the current scene breathe, deepen, and unfold without prematurely transitioning.',
+
+        advanceInstruction:
+            'Current user-direction signal: allow movement toward the next beat. Transition smoothly through natural consequences rather than abrupt narration.',
+
+        pacingInstruction:
+            [
+                'Strictness value: {{strictness}}',
+                'Pacing bias value: {{pacing_bias}}',
+                'Lower strictness means more freedom and softer canon guidance.',
+                'Higher strictness means stronger canon alignment while still respecting user agency.',
+                'Lower pacing bias means slower development; higher pacing bias means more visible narrative momentum.'
+            ].join('\n'),
+
+        evaluatorPrompt:
+            [
+                'You are evaluating roleplay progression for a story timeline controller.',
+                'Read the recent chat and determine whether the USER is signaling that the story should stay on the current beat or may transition toward the next beat.',
+                'Respect lingering behavior. Wanting to talk more, investigate more, reflect more, train more, or dwell on consequences counts as staying on the current beat unless the user clearly pushes onward.',
+                'Return ONLY valid JSON with these keys:',
+                '{',
+                '  "decision": "stay" | "advance",',
+                '  "confidence": 0.0,',
+                '  "reason": "short explanation",',
+                '  "beat_complete": true,',
+                '  "user_wants_to_linger": false',
+                '}',
+                '',
+                'Story title: {{story_title}}',
+                'Current beat: {{current_title}}',
+                'Current beat summary: {{current_summary}}',
+                'Current beat objectives: {{current_objectives_inline}}',
+                'Current beat completion hints: {{current_hints_inline}}',
+                'Next beat: {{next_title}}',
+                'Recent chat:',
+                '{{recent_chat}}'
+            ].join('\n')
+    }
+});
+
+const DEFAULT_SETTINGS = Object.freeze({
+    profiles: [],
+    knownChats: [],
+    ui: {
+        selectedProfileId: ''
+    }
+});
+
+function getCtx() {
+    return SillyTavern.getContext();
 }
 
-Rules:
-- Respect user roleplay intent. Do not mark progression as appropriate if the user is clearly choosing to linger on the current beat.
-- "userWantsAdvance" should be true only when the user's direction clearly pushes events forward.
-- "userWantsDelay" should be true when the user's direction clearly indicates they want to remain, explore, converse, investigate, reflect, or otherwise not move on yet.
-- "beatComplete" should be based on the configured hints or objectives plus what actually happened in the recent chat.
-- Confidence must be between 0 and 1.`,
-    lastEvaluation: 'Not evaluated yet.',
-    lastCheckHash: ''
-};
-
-const defaultSettings = {
-    entries: {},
-    activeEntryId: '',
-    debugMode: false
-};
-
-let ui = {
-    ready: false,
-    draftEntry: null,
-    dirty: false
-};
-
-function log(...args) {
-    console.log(`[${MODULE_NAME_FANCY}]`, ...args);
+function getExtensionSettings() {
+    return getCtx().extensionSettings;
 }
 
-function warnToast(message) {
-    toastr.warning(message, MODULE_NAME_FANCY);
+function saveSettings() {
+    getCtx().saveSettingsDebounced();
 }
 
-function infoToast(message) {
-    toastr.info(message, MODULE_NAME_FANCY);
+async function saveChatMetadata() {
+    if (typeof getCtx().saveMetadata === 'function') {
+        await getCtx().saveMetadata();
+    }
 }
 
-function successToast(message) {
-    toastr.success(message, MODULE_NAME_FANCY);
-}
-
-function errorToast(message) {
-    toastr.error(message, MODULE_NAME_FANCY);
-}
-
-function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, m => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-    }[m]));
-}
-
-function getExtensionDirectory() {
-    const indexPath = new URL(import.meta.url).pathname;
-    return indexPath.substring(0, indexPath.lastIndexOf('/'));
-}
-
-async function loadSettingsHtml() {
-    const moduleDir = getExtensionDirectory();
-    const path = `${moduleDir}/${SETTINGS_HTML_FILE}`;
-    await $.get(path).then((response) => {
-        $('#extensions_settings2').append(response);
-    }).catch((response) => {
-        throw new Error(`Failed to load settings.html (${response?.status ?? 'unknown status'})`);
-    });
+function mergeDeep(target, source) {
+    const { lodash } = SillyTavern.libs;
+    return lodash.merge(target, source);
 }
 
 function ensureSettings() {
-    if (!extension_settings[MODULE_NAME]) {
-        extension_settings[MODULE_NAME] = structuredClone(defaultSettings);
-    }
-
-    extension_settings[MODULE_NAME] = Object.assign(
-        structuredClone(defaultSettings),
-        extension_settings[MODULE_NAME]
+    const extensionSettings = getExtensionSettings();
+    extensionSettings[MODULE_ID] = mergeDeep(
+        structuredClone(DEFAULT_SETTINGS),
+        extensionSettings[MODULE_ID] || {}
     );
 
-    const settings = extension_settings[MODULE_NAME];
-
-    if (!settings.entries || typeof settings.entries !== 'object') {
-        settings.entries = {};
+    if (!Array.isArray(extensionSettings[MODULE_ID].profiles)) {
+        extensionSettings[MODULE_ID].profiles = [];
     }
 
-    if (!settings.activeEntryId || !settings.entries[settings.activeEntryId]) {
-        const firstEntryId = Object.keys(settings.entries)[0];
-        if (firstEntryId) {
-            settings.activeEntryId = firstEntryId;
+    if (!Array.isArray(extensionSettings[MODULE_ID].knownChats)) {
+        extensionSettings[MODULE_ID].knownChats = [];
+    }
+
+    return extensionSettings[MODULE_ID];
+}
+
+function makeId(prefix = 'destinia') {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getCharacterName(ctx) {
+    try {
+        if (ctx.groupId) return `Group ${ctx.groupId}`;
+        if (typeof ctx.characterId === 'number' && ctx.characters?.[ctx.characterId]) {
+            return ctx.characters[ctx.characterId].name || `Character ${ctx.characterId}`;
         }
+    } catch {
+        // ignore
+    }
+    return 'Unknown Chat';
+}
+
+function getChatKey(ctx = getCtx()) {
+    const candidates = [
+        ctx.chatId,
+        ctx.chat_id,
+        ctx.chatFileName,
+        ctx.chatName,
+        ctx.name2 && `${getCharacterName(ctx)}::${ctx.name2}`,
+        ctx.groupId && `group:${ctx.groupId}`,
+        typeof ctx.characterId === 'number' ? `char:${ctx.characterId}` : '',
+    ].filter(Boolean);
+
+    if (candidates.length > 0) {
+        return `chat::${candidates[0]}`;
     }
 
-    return settings;
+    const messageSeed = (ctx.chat || [])
+        .slice(0, 4)
+        .map(m => `${m.name || ''}:${m.send_date || ''}:${String(m.mes || '').slice(0, 20)}`)
+        .join('|');
+
+    return `fallback::${getCharacterName(ctx)}::${messageSeed || 'empty'}`;
 }
 
-function getSettings() {
-    return ensureSettings();
+function getChatLabel(ctx = getCtx()) {
+    const characterLabel = getCharacterName(ctx);
+    const secondary = ctx.chatName || ctx.name2 || ctx.chatId || ctx.chatFileName || 'Current Chat';
+    return `${characterLabel} — ${secondary}`;
 }
 
-function getEntries() {
-    return getSettings().entries;
-}
+function registerKnownChat() {
+    const settings = ensureSettings();
+    const key = getChatKey();
+    const label = getChatLabel();
+    const existing = settings.knownChats.find(x => x.key === key);
 
-function getEntry(entryId = null) {
-    const settings = getSettings();
-    const id = entryId ?? settings.activeEntryId;
-    return id ? settings.entries[id] ?? null : null;
-}
-
-function setDirty(value) {
-    ui.dirty = Boolean(value);
-    const label = $('#aspect_destinia_dirty_label');
-    if (!label.length) return;
-
-    if (ui.dirty) {
-        label.text('Unsaved changes').removeClass('aspect-destinia-saved').addClass('aspect-destinia-dirty');
+    if (existing) {
+        existing.label = label;
+        existing.lastSeen = Date.now();
     } else {
-        label.text('Saved').removeClass('aspect-destinia-dirty').addClass('aspect-destinia-saved');
-    }
-}
-
-function newId() {
-    return `destinia_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function normalizeTimelineObject(parsed) {
-    const timeline = Object.assign({}, defaultTimelineTemplate, parsed || {});
-    if (!Array.isArray(timeline.plotPoints)) {
-        timeline.plotPoints = structuredClone(defaultTimelineTemplate.plotPoints);
-    }
-
-    timeline.plotPoints = timeline.plotPoints.map((point, index) => ({
-        id: point.id || `beat_${index + 1}`,
-        title: point.title || `Beat ${index + 1}`,
-        summary: point.summary || '',
-        steeringPrompt: point.steeringPrompt || '',
-        completionHints: Array.isArray(point.completionHints) ? point.completionHints : [],
-        objectives: Array.isArray(point.objectives) ? point.objectives : [],
-        pace: point.pace || 'medium',
-        delayable: point.delayable !== false
-    }));
-
-    return timeline;
-}
-
-function buildEntryFromDefaults() {
-    const entry = structuredClone(defaultEntry);
-    entry.id = newId();
-    return entry;
-}
-
-function getCurrentChatKey() {
-    const ctx = getContext();
-    const parts = [];
-
-    if (ctx.groupId) {
-        parts.push(`group:${ctx.groupId}`);
-    } else if (ctx.characterId !== undefined && ctx.characterId !== null) {
-        parts.push(`char:${ctx.characterId}`);
-    } else {
-        parts.push('chat:unknown-scope');
-    }
-
-    if (ctx.chatId) {
-        parts.push(`chatid:${ctx.chatId}`);
-    } else if (ctx.chat?.length !== undefined) {
-        parts.push(`len:${ctx.chat.length}`);
-    }
-
-    return parts.join('|');
-}
-
-function getCurrentChatLabel() {
-    const ctx = getContext();
-    const who = ctx.groupId ? (ctx.name2 || 'Group Chat') : (ctx.name2 || 'Chat');
-    const suffix = ctx.chatId ? ` (${ctx.chatId})` : '';
-    return `${who}${suffix}`;
-}
-
-function collectDetectedChats() {
-    const map = new Map();
-
-    const currentKey = getCurrentChatKey();
-    const currentLabel = getCurrentChatLabel();
-    map.set(currentKey, currentLabel);
-
-    for (const entry of Object.values(getEntries())) {
-        if (entry.boundChatKey) {
-            map.set(entry.boundChatKey, entry.boundChatLabel || entry.boundChatKey);
-        }
-    }
-
-    const selectors = [
-        '[data-chat-id]',
-        '[chatid]',
-        '#SelectChatPopup [data-id]',
-        '#select_chat_popup [data-id]',
-        '.select_chat_block[chatid]',
-        '.select_chat_block[data-chat-id]'
-    ];
-
-    for (const selector of selectors) {
-        document.querySelectorAll(selector).forEach((el) => {
-            const id = el.getAttribute('data-chat-id') || el.getAttribute('chatid') || el.getAttribute('data-id');
-            if (!id) return;
-
-            const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
-            const label = text || `Chat ${id}`;
-            if (!map.has(id)) {
-                map.set(id, label);
-            }
+        settings.knownChats.push({
+            key,
+            label,
+            lastSeen: Date.now()
         });
     }
 
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+    settings.knownChats.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+    saveSettings();
 }
 
-function refreshEntryDropdown() {
-    const $select = $('#aspect_destinia_entry_select');
-    if (!$select.length) return;
-
-    const settings = getSettings();
-    $select.empty();
-
-    const entries = Object.values(getEntries());
-    if (!entries.length) {
-        $select.append('<option value="">No entries</option>');
-    } else {
-        for (const entry of entries) {
-            const selected = entry.id === settings.activeEntryId ? 'selected' : '';
-            $select.append(`<option value="${escapeHtml(entry.id)}" ${selected}>${escapeHtml(entry.name)}</option>`);
-        }
+function getMetadataBucket() {
+    const ctx = getCtx();
+    if (!ctx.chatMetadata[MODULE_ID]) {
+        ctx.chatMetadata[MODULE_ID] = {};
     }
+    return ctx.chatMetadata[MODULE_ID];
 }
 
-function refreshChatDropdown() {
-    const $select = $('#aspect_destinia_chat_select');
-    if (!$select.length) return;
-
-    const selectedValue = $select.val();
-    const chats = collectDetectedChats();
-
-    $select.empty();
-    for (const chat of chats) {
-        $select.append(`<option value="${escapeHtml(chat.id)}">${escapeHtml(chat.label)}</option>`);
-    }
-
-    if (selectedValue && chats.some(x => x.id === selectedValue)) {
-        $select.val(selectedValue);
-    } else if (chats.length) {
-        $select.val(chats[0].id);
-    }
+function getProfiles() {
+    return ensureSettings().profiles;
 }
 
-function autoSelectEntryForCurrentChat() {
-    const settings = getSettings();
-    const currentChatKey = getCurrentChatKey();
-
-    const match = Object.values(getEntries()).find(entry => entry.boundChatKey === currentChatKey);
-    if (match) {
-        settings.activeEntryId = match.id;
-    }
+function getProfileById(profileId) {
+    return getProfiles().find(p => p.id === profileId) || null;
 }
 
-function loadDraftFromActiveEntry() {
-    const entry = getEntry();
-    ui.draftEntry = entry ? structuredClone(entry) : null;
-    setDirty(false);
-    renderFormFromDraft();
-    updateStatusCards();
-    updatePrompt();
+function getSelectedProfileId() {
+    return ensureSettings().ui.selectedProfileId || '';
 }
 
-function renderFormFromDraft() {
-    const d = ui.draftEntry;
-    if (!ui.ready) return;
+function setSelectedProfileId(profileId) {
+    ensureSettings().ui.selectedProfileId = profileId || '';
+    saveSettings();
+}
 
-    refreshEntryDropdown();
-    refreshChatDropdown();
-
-    if (!d) {
-        $('#aspect_destinia_active_chip').text('No active entry');
-        return;
+function getLinkedProfileIdForCurrentChat() {
+    const metadata = getMetadataBucket();
+    if (metadata.profileId && getProfileById(metadata.profileId)) {
+        return metadata.profileId;
     }
 
-    $('#aspect_destinia_active_chip').text(`Active: ${d.name}`);
-    $('#aspect_destinia_entry_name').val(d.name);
-    $('#aspect_destinia_enabled').prop('checked', d.enabled);
-    $('#aspect_destinia_auto_evaluate').prop('checked', d.autoEvaluate);
-    $('#aspect_destinia_auto_advance').prop('checked', d.autoAdvance);
-    $('#aspect_destinia_hold').prop('checked', d.hold);
-    $('#aspect_destinia_show_next').prop('checked', d.showNextBeat);
-    $('#aspect_destinia_advancement_mode').val(d.advancementMode);
-    $('#aspect_destinia_completion_threshold').val(d.completionThreshold);
-
-    $('#aspect_destinia_story_title').val(d.storyTitle);
-    $('#aspect_destinia_story_style').val(d.storyStyle);
-    $('#aspect_destinia_timeline_text').val(d.timelineText);
-
-    $('#aspect_destinia_instruction_preamble').val(d.instructionPreamble);
-    $('#aspect_destinia_instruction_story_style').val(d.instructionStoryStyle);
-    $('#aspect_destinia_instruction_current_beat').val(d.instructionCurrentBeat);
-    $('#aspect_destinia_instruction_hints_mode').val(d.instructionHintsMode);
-    $('#aspect_destinia_instruction_objectives_mode').val(d.instructionObjectivesMode);
-    $('#aspect_destinia_instruction_user_advance').val(d.instructionUserAdvance);
-    $('#aspect_destinia_instruction_user_delay').val(d.instructionUserDelay);
-    $('#aspect_destinia_instruction_transition').val(d.instructionTransition);
-    $('#aspect_destinia_instruction_next_beat').val(d.instructionNextBeat);
-    $('#aspect_destinia_instruction_hold').val(d.instructionHold);
-    $('#aspect_destinia_instruction_do_not_expose').val(d.instructionDoNotExpose);
-    $('#aspect_destinia_evaluator_instruction').val(d.evaluatorInstruction);
-
-    $('#aspect_destinia_bound_chat_label').text(d.boundChatLabel || '—');
+    const currentChatKey = getChatKey();
+    const linkedByChat = getProfiles().find(p => p.attachedChatKey === currentChatKey);
+    return linkedByChat?.id || '';
 }
 
-function updateStatusCards() {
-    const d = ui.draftEntry;
-    if (!d) {
-        $('#aspect_destinia_current_beat_label').text('—');
-        $('#aspect_destinia_last_eval_label').text('—');
-        $('#aspect_destinia_bound_chat_label').text('—');
-        return;
+function getActiveProfile() {
+    const linked = getLinkedProfileIdForCurrentChat();
+    if (linked) return getProfileById(linked);
+
+    const selected = getSelectedProfileId();
+    if (selected) return getProfileById(selected);
+
+    return null;
+}
+
+function getActiveTimeline(profile) {
+    if (!profile) return null;
+    if (!profile.timeline || !Array.isArray(profile.timeline.plotPoints)) {
+        profile.timeline = safeParseTimeline(profile.timelineText) || structuredClone(DEFAULT_TIMELINE_TEMPLATE);
     }
-
-    const point = getCurrentPoint(d);
-    $('#aspect_destinia_current_beat_label').text(point ? `${d.currentIndex + 1}. ${point.title}` : 'No beat');
-    $('#aspect_destinia_last_eval_label').text(d.lastEvaluation || 'Not evaluated yet.');
-    $('#aspect_destinia_bound_chat_label').text(d.boundChatLabel || '—');
+    return profile.timeline;
 }
 
-function updateDraftField(key, value) {
-    if (!ui.draftEntry) return;
-    ui.draftEntry[key] = value;
-    setDirty(true);
-    updateStatusCards();
-}
-
-function getCurrentPoint(entry = null) {
-    const d = entry || ui.draftEntry || getEntry();
-    if (!d?.timeline?.plotPoints?.length) return null;
-    const index = Math.max(0, Math.min(d.currentIndex || 0, d.timeline.plotPoints.length - 1));
-    return d.timeline.plotPoints[index] || null;
-}
-
-function getNextPoint(entry = null) {
-    const d = entry || ui.draftEntry || getEntry();
-    if (!d?.timeline?.plotPoints?.length) return null;
-    return d.timeline.plotPoints[(d.currentIndex || 0) + 1] || null;
-}
-
-function saveDraftToActiveEntry() {
-    const settings = getSettings();
-    const active = getEntry();
-
-    if (!ui.draftEntry || !active) {
-        warnToast('No active entry to save.');
-        return;
-    }
-
+function safeParseTimeline(text) {
     try {
-        const parsed = JSON.parse(ui.draftEntry.timelineText);
-        ui.draftEntry.timeline = normalizeTimelineObject(parsed);
-        ui.draftEntry.storyTitle = ui.draftEntry.storyTitle || ui.draftEntry.timeline.storyTitle || 'Untitled Story';
-        if (!ui.draftEntry.storyStyle?.trim()) {
-            ui.draftEntry.storyStyle = ui.draftEntry.timeline.systemStyle || '';
-        }
-
-        const maxIndex = Math.max(0, ui.draftEntry.timeline.plotPoints.length - 1);
-        ui.draftEntry.currentIndex = Math.min(Math.max(0, Number(ui.draftEntry.currentIndex) || 0), maxIndex);
-
-        settings.entries[active.id] = structuredClone(ui.draftEntry);
-        saveSettingsDebounced();
-        setDirty(false);
-        renderFormFromDraft();
-        updateStatusCards();
-        updatePrompt();
-        successToast('Entry saved.');
-    } catch (error) {
-        errorToast(`Invalid timeline JSON: ${error.message}`);
-    }
-}
-
-async function createEntryForCurrentChat() {
-    const ctx = getContext();
-    const name = await ctx.Popup.show.input('New Destinia Entry', 'Entry name:', 'New Entry');
-    if (!name) return;
-
-    const entry = buildEntryFromDefaults();
-    entry.name = name.trim() || 'New Entry';
-    entry.boundChatKey = getCurrentChatKey();
-    entry.boundChatLabel = getCurrentChatLabel();
-
-    const settings = getSettings();
-    settings.entries[entry.id] = entry;
-    settings.activeEntryId = entry.id;
-    saveSettingsDebounced();
-
-    ui.draftEntry = structuredClone(entry);
-    refreshEntryDropdown();
-    renderFormFromDraft();
-    updateStatusCards();
-    updatePrompt();
-    successToast('Entry created and bound to the active chat.');
-}
-
-async function duplicateActiveEntry() {
-    const source = getEntry();
-    if (!source) {
-        warnToast('No active entry to duplicate.');
-        return;
-    }
-
-    const copy = structuredClone(source);
-    copy.id = newId();
-    copy.name = `${source.name} Copy`;
-
-    const settings = getSettings();
-    settings.entries[copy.id] = copy;
-    settings.activeEntryId = copy.id;
-    saveSettingsDebounced();
-
-    ui.draftEntry = structuredClone(copy);
-    refreshEntryDropdown();
-    renderFormFromDraft();
-    updateStatusCards();
-    updatePrompt();
-    successToast('Entry duplicated.');
-}
-
-async function deleteActiveEntry() {
-    const active = getEntry();
-    if (!active) {
-        warnToast('No active entry to delete.');
-        return;
-    }
-
-    const ok = await getContext().Popup.show.confirm(
-        `Delete entry "${active.name}"?`,
-        'This cannot be undone.',
-        { okButton: 'Delete', cancelButton: 'Cancel' }
-    );
-
-    if (!ok) return;
-
-    const settings = getSettings();
-    delete settings.entries[active.id];
-
-    const remaining = Object.keys(settings.entries);
-    settings.activeEntryId = remaining[0] || '';
-    saveSettingsDebounced();
-
-    loadDraftFromActiveEntry();
-    refreshEntryDropdown();
-    updateStatusCards();
-    updatePrompt();
-    successToast('Entry deleted.');
-}
-
-function bindActiveEntryToSelectedChat() {
-    if (!ui.draftEntry) {
-        warnToast('No active entry selected.');
-        return;
-    }
-
-    const selectedKey = $('#aspect_destinia_chat_select').val();
-    const chats = collectDetectedChats();
-    const chat = chats.find(x => x.id === selectedKey);
-
-    if (!chat) {
-        warnToast('No chat selected.');
-        return;
-    }
-
-    ui.draftEntry.boundChatKey = chat.id;
-    ui.draftEntry.boundChatLabel = chat.label;
-    setDirty(true);
-    renderFormFromDraft();
-    updateStatusCards();
-}
-
-function bindActiveEntryToCurrentChat() {
-    if (!ui.draftEntry) {
-        warnToast('No active entry selected.');
-        return;
-    }
-
-    ui.draftEntry.boundChatKey = getCurrentChatKey();
-    ui.draftEntry.boundChatLabel = getCurrentChatLabel();
-    setDirty(true);
-    renderFormFromDraft();
-    updateStatusCards();
-}
-
-function buildGuidancePrompt(entry) {
-    if (!entry?.enabled) return '';
-
-    const point = getCurrentPoint(entry);
-    if (!point) return '';
-
-    const nextPoint = getNextPoint(entry);
-
-    const lines = [
-        `[${MODULE_NAME_FANCY}]`,
-        entry.instructionPreamble,
-        `Story title: ${entry.storyTitle || entry.timeline?.storyTitle || 'Untitled Story'}`,
-        `${entry.instructionStoryStyle}`,
-        `Story style details: ${entry.storyStyle || entry.timeline?.systemStyle || ''}`,
-        `${entry.instructionCurrentBeat}`,
-        `Current beat: ${point.title}`,
-        `Current beat summary: ${point.summary || ''}`,
-        `Current beat steering: ${point.steeringPrompt || ''}`
-    ];
-
-    if (entry.advancementMode === 'objectives') {
-        lines.push(entry.instructionObjectivesMode);
-        lines.push(`Current beat objectives: ${(point.objectives || []).join('; ') || 'None provided.'}`);
-    } else {
-        lines.push(entry.instructionHintsMode);
-        lines.push(`Current beat completion hints: ${(point.completionHints || []).join('; ') || 'None provided.'}`);
-    }
-
-    lines.push(entry.instructionUserAdvance);
-    lines.push(entry.instructionUserDelay);
-
-    if (entry.hold) {
-        lines.push(entry.instructionHold);
-    } else {
-        lines.push(entry.instructionTransition);
-    }
-
-    if (entry.showNextBeat && nextPoint) {
-        lines.push(entry.instructionNextBeat);
-        lines.push(`Next beat to foreshadow lightly: ${nextPoint.title} — ${nextPoint.summary || ''}`);
-    }
-
-    lines.push(entry.instructionDoNotExpose);
-
-    return lines.filter(Boolean).join('\n');
-}
-
-function updatePrompt() {
-    const ctx = getContext();
-    const active = getEntry();
-
-    if (!ctx?.setExtensionPrompt) return;
-
-    if (!active || active.boundChatKey !== getCurrentChatKey() || !active.enabled) {
-        ctx.setExtensionPrompt(PROMPT_KEY, '');
-        return;
-    }
-
-    const prompt = buildGuidancePrompt(active);
-    ctx.setExtensionPrompt(PROMPT_KEY, prompt, 2, 0, false, 0);
-}
-
-function hashRecentMessages() {
-    const ctx = getContext();
-    const content = (ctx.chat || []).slice(-10).map(m => `${m.name || (m.is_user ? 'User' : 'Assistant')}:${m.mes || ''}`).join('\n');
-
-    let hash = 0;
-    for (let i = 0; i < content.length; i++) {
-        hash = (Math.imul(31, hash) + content.charCodeAt(i)) | 0;
-    }
-    return String(hash);
-}
-
-function safeJsonParse(text) {
-    try {
-        return JSON.parse(text);
+        const parsed = typeof text === 'string' ? JSON.parse(text) : text;
+        if (!parsed || !Array.isArray(parsed.plotPoints)) return null;
+        return parsed;
     } catch {
-        const match = String(text || '').match(/\{[\s\S]*\}/);
+        return null;
+    }
+}
+
+function getCurrentBeat(profile) {
+    const timeline = getActiveTimeline(profile);
+    const points = timeline?.plotPoints || [];
+    const idx = Math.max(0, Math.min(profile.state.currentIndex || 0, Math.max(points.length - 1, 0)));
+    profile.state.currentIndex = idx;
+    return points[idx] || null;
+}
+
+function getNextBeat(profile) {
+    const timeline = getActiveTimeline(profile);
+    const points = timeline?.plotPoints || [];
+    return points[(profile.state.currentIndex || 0) + 1] || null;
+}
+
+function formatList(items) {
+    if (!Array.isArray(items) || items.length === 0) return '- none';
+    return items.map(item => `- ${item}`).join('\n');
+}
+
+function replaceMacros(template, data) {
+    return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+        return data[key] ?? '';
+    });
+}
+
+function buildTemplateData(profile) {
+    const timeline = getActiveTimeline(profile) || {};
+    const current = getCurrentBeat(profile) || {};
+    const next = getNextBeat(profile) || {};
+
+    return {
+        story_title: timeline.storyTitle || '',
+        story_style: timeline.systemStyle || '',
+        progression_notes: timeline.progressionNotes || '',
+        total_beats: String(timeline.plotPoints?.length || 0),
+        current_index: String((profile.state.currentIndex || 0) + 1),
+        current_title: current.title || '',
+        current_summary: current.summary || '',
+        current_steering: current.steeringPrompt || '',
+        current_pace: current.pace || 'medium',
+        current_objectives: formatList(current.objectives),
+        current_hints: formatList(current.completionHints),
+        current_objectives_inline: Array.isArray(current.objectives) ? current.objectives.join('; ') : '',
+        current_hints_inline: Array.isArray(current.completionHints) ? current.completionHints.join('; ') : '',
+        next_title: next.title || 'None',
+        next_summary: next.summary || 'No next beat.',
+        strictness: Number(profile.strictness || 0).toFixed(2),
+        pacing_bias: Number(profile.pacingBias || 0).toFixed(2)
+    };
+}
+
+function buildInjection(profile) {
+    if (!profile?.enabled) return '';
+
+    const data = buildTemplateData(profile);
+    const prompts = profile.prompts || {};
+    const chunks = [];
+
+    chunks.push(replaceMacros(prompts.injectionIntro, data));
+    chunks.push(replaceMacros(prompts.guidancePrinciples, data));
+    chunks.push(replaceMacros(prompts.currentBeatTemplate, data));
+
+    if (profile.advancementMode === 'objectives') {
+        chunks.push(replaceMacros(prompts.objectiveModeTemplate, data));
+    } else {
+        chunks.push(replaceMacros(prompts.hintModeTemplate, data));
+    }
+
+    if (profile.foreshadowNextBeat && getNextBeat(profile)) {
+        chunks.push(replaceMacros(prompts.nextBeatTemplate, data));
+    }
+
+    chunks.push(replaceMacros(prompts.pacingInstruction, data));
+
+    if (profile.respectUserIntent && profile.state.lastIntentDecision === 'advance') {
+        chunks.push(prompts.advanceInstruction || '');
+    } else {
+        chunks.push(prompts.lingerInstruction || '');
+    }
+
+    if (profile.state.lastIntentReason) {
+        chunks.push(`Most recent intent reasoning: ${profile.state.lastIntentReason}`);
+    }
+
+    return chunks.filter(Boolean).join('\n\n');
+}
+
+function buildSystemNote(injectionText) {
+    return {
+        is_user: false,
+        name: 'System',
+        send_date: Date.now(),
+        mes: `[${MODULE_NAME}]\n${injectionText}`,
+        extra: {
+            type: 'system',
+            aspectDestinia: true
+        }
+    };
+}
+
+function insertInterceptorNote(chat, injectionText) {
+    if (!injectionText || !Array.isArray(chat) || chat.length === 0) return;
+
+    const note = buildSystemNote(injectionText);
+    const lastUserIndex = [...chat].reverse().findIndex(m => m?.is_user);
+    if (lastUserIndex === -1) {
+        chat.push(note);
+        return;
+    }
+
+    const absoluteIndex = chat.length - 1 - lastUserIndex;
+    chat.splice(absoluteIndex, 0, note);
+}
+
+async function aspectDestiniaInterceptor(chat, contextSize, abort, type) {
+    try {
+        if (type === 'quiet') return;
+
+        const profile = getActiveProfile();
+        if (!profile?.enabled) return;
+
+        const injection = buildInjection(profile);
+        insertInterceptorNote(chat, injection);
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] Interceptor failed`, err);
+    }
+}
+globalThis.aspectDestiniaInterceptor = aspectDestiniaInterceptor;
+
+function chatHash(limit = 8) {
+    const ctx = getCtx();
+    const text = (ctx.chat || [])
+        .slice(-limit)
+        .map(m => `${m.is_user ? 'U' : 'A'}|${m.name || ''}|${m.send_date || ''}|${m.mes || ''}`)
+        .join('\n');
+
+    let h = 0;
+    for (let i = 0; i < text.length; i++) {
+        h = Math.imul(31, h) + text.charCodeAt(i) | 0;
+    }
+    return String(h);
+}
+
+function stringifyRecentChat(limit = 8) {
+    const ctx = getCtx();
+    return (ctx.chat || [])
+        .slice(-limit)
+        .map((m, idx) => `${idx + 1}. ${m.is_user ? 'User' : (m.name || 'Assistant')}: ${String(m.mes || '').trim()}`)
+        .join('\n');
+}
+
+async function evaluateIntentIfNeeded(trigger = 'unknown') {
+    const ctx = getCtx();
+    const profile = getActiveProfile();
+    if (!profile?.enabled) return;
+    if (!profile.autoAdvance && !profile.respectUserIntent) return;
+
+    const currentBeat = getCurrentBeat(profile);
+    if (!currentBeat) return;
+
+    const hash = chatHash(profile.intentWindow || 8);
+    if (hash === profile.state.lastEvalHash) return;
+
+    profile.state.lastEvalHash = hash;
+
+    const data = buildTemplateData(profile);
+    data.recent_chat = stringifyRecentChat(profile.intentWindow || 8);
+
+    const prompt = replaceMacros(profile.prompts.evaluatorPrompt || '', data);
+
+    try {
+        const result = await ctx.generateQuietPrompt({ quietPrompt: prompt });
+        const parsed = parseJsonObject(result);
+
+        if (!parsed) {
+            profile.state.lastIntentDecision = 'stay';
+            profile.state.lastIntentConfidence = 0;
+            profile.state.lastIntentReason = 'Evaluation returned non-JSON; defaulted to stay.';
+            persistProfile(profile);
+            return;
+        }
+
+        const decision = parsed.decision === 'advance' ? 'advance' : 'stay';
+        const confidence = clamp01(Number(parsed.confidence) || 0);
+        const beatComplete = Boolean(parsed.beat_complete);
+        const userWantsToLinger = Boolean(parsed.user_wants_to_linger);
+
+        let finalDecision = decision;
+        if (userWantsToLinger) finalDecision = 'stay';
+        if (!beatComplete && finalDecision === 'advance' && profile.advancementMode === 'objectives') {
+            finalDecision = 'stay';
+        }
+
+        profile.state.lastIntentDecision = finalDecision;
+        profile.state.lastIntentConfidence = confidence;
+        profile.state.lastIntentReason = String(parsed.reason || 'No reason provided.');
+
+        const canAdvance =
+            profile.autoAdvance &&
+            finalDecision === 'advance' &&
+            confidence >= Number(profile.transitionThreshold || 0.72) &&
+            !!getNextBeat(profile);
+
+        if (canAdvance) {
+            profile.state.currentIndex += 1;
+            profile.state.lastTransitionAt = Date.now();
+            const newBeat = getCurrentBeat(profile);
+            profile.state.lastIntentReason = `Advanced after ${trigger}: ${profile.state.lastIntentReason}`;
+            toastr.info(`${MODULE_NAME}: moved to "${newBeat?.title || 'next beat'}".`);
+        }
+
+        persistProfile(profile);
+        refreshUI();
+    } catch (err) {
+        console.warn(`[${MODULE_NAME}] Intent evaluation failed`, err);
+        profile.state.lastIntentDecision = 'stay';
+        profile.state.lastIntentReason = `Evaluation failed: ${err.message}`;
+        persistProfile(profile);
+    }
+}
+
+function parseJsonObject(text) {
+    if (!text) return null;
+    const raw = String(text).trim();
+    try {
+        return JSON.parse(raw);
+    } catch {
+        const match = raw.match(/\{[\s\S]*\}/);
         if (!match) return null;
         try {
             return JSON.parse(match[0]);
@@ -667,216 +576,572 @@ function safeJsonParse(text) {
     }
 }
 
-async function maybeEvaluateProgress() {
-    const active = getEntry();
-    const ctx = getContext();
+function clamp01(n) {
+    if (Number.isNaN(n)) return 0;
+    return Math.max(0, Math.min(1, n));
+}
 
-    if (!active) return;
-    if (active.boundChatKey !== getCurrentChatKey()) return;
-    if (!active.enabled || !active.autoEvaluate || active.hold) return;
-
-    const point = getCurrentPoint(active);
-    if (!point) return;
-
-    const recentHash = hashRecentMessages();
-    if (recentHash === active.lastCheckHash) return;
-
-    active.lastCheckHash = recentHash;
-
-    const recentChat = (ctx.chat || []).slice(-10).map((m, i) => {
-        const who = m.is_user ? 'User' : (m.name || 'Assistant');
-        return `${i + 1}. ${who}: ${m.mes || ''}`;
-    }).join('\n');
-
-    const criteriaText = active.advancementMode === 'objectives'
-        ? `Current beat objectives: ${(point.objectives || []).join('; ') || 'None provided.'}`
-        : `Current beat completion hints: ${(point.completionHints || []).join('; ') || 'None provided.'}`;
-
-    const prompt = [
-        active.evaluatorInstruction,
-        `Advancement rule mode: ${active.advancementMode}`,
-        `Story title: ${active.storyTitle || ''}`,
-        `Current beat title: ${point.title}`,
-        `Current beat summary: ${point.summary || ''}`,
-        `Current beat steering: ${point.steeringPrompt || ''}`,
-        criteriaText,
-        `Recent chat:\n${recentChat}`
-    ].join('\n\n');
-
-    try {
-        const raw = await generateQuietPrompt(prompt, false, false);
-        const parsed = safeJsonParse(raw);
-
-        if (!parsed) {
-            active.lastEvaluation = 'Evaluator returned non-JSON; ignored.';
-            saveSettingsDebounced();
-            if (ui.draftEntry && ui.draftEntry.id === active.id) {
-                ui.draftEntry.lastEvaluation = active.lastEvaluation;
-                updateStatusCards();
-            }
-            return;
-        }
-
-        const beatComplete = Boolean(parsed.beatComplete);
-        const userWantsAdvance = Boolean(parsed.userWantsAdvance);
-        const userWantsDelay = Boolean(parsed.userWantsDelay);
-        const confidence = Number(parsed.confidence) || 0;
-        const reason = String(parsed.reason || 'No reason given.');
-
-        active.lastEvaluation =
-            `${beatComplete ? 'Complete' : 'Incomplete'} | ` +
-            `advance:${userWantsAdvance ? 'yes' : 'no'} | ` +
-            `delay:${userWantsDelay ? 'yes' : 'no'} | ` +
-            `conf:${confidence.toFixed(2)} | ${reason}`;
-
-        const threshold = Number(active.completionThreshold) || 0.78;
-        const shouldAdvance =
-            active.autoAdvance &&
-            beatComplete &&
-            confidence >= threshold &&
-            !userWantsDelay &&
-            (userWantsAdvance || !point.delayable);
-
-        if (shouldAdvance) {
-            const maxIndex = active.timeline.plotPoints.length - 1;
-            if (active.currentIndex < maxIndex) {
-                active.currentIndex += 1;
-                active.lastEvaluation = `Advanced to beat ${active.currentIndex + 1}. ${reason}`;
-                successToast(`Advanced to: ${getCurrentPoint(active)?.title || 'Next beat'}`);
-            }
-        }
-
-        saveSettingsDebounced();
-
-        if (ui.draftEntry && ui.draftEntry.id === active.id && !ui.dirty) {
-            ui.draftEntry = structuredClone(active);
-            renderFormFromDraft();
-            updateStatusCards();
-        }
-
-        updatePrompt();
-    } catch (error) {
-        active.lastEvaluation = `Evaluation failed: ${error.message}`;
-        saveSettingsDebounced();
-
-        if (ui.draftEntry && ui.draftEntry.id === active.id && !ui.dirty) {
-            ui.draftEntry.lastEvaluation = active.lastEvaluation;
-            updateStatusCards();
-        }
+function persistProfile(profile) {
+    const profiles = getProfiles();
+    const idx = profiles.findIndex(p => p.id === profile.id);
+    if (idx !== -1) {
+        profiles[idx] = profile;
+        saveSettings();
     }
 }
 
-function bindInput(selector, key, transform = (v) => v) {
-    $(selector).on('change input', function () {
-        updateDraftField(key, transform($(this).val()));
+function createProfileAttachedToCurrentChat() {
+    registerKnownChat();
+
+    const chatKey = getChatKey();
+    const chatLabel = getChatLabel();
+
+    const profile = mergeDeep(structuredClone(DEFAULT_PROFILE), {
+        id: makeId('entry'),
+        entryName: `Entry for ${chatLabel}`,
+        attachedChatKey: chatKey,
+        attachedChatLabel: chatLabel
     });
+
+    getProfiles().push(profile);
+    setSelectedProfileId(profile.id);
+
+    const metadata = getMetadataBucket();
+    metadata.profileId = profile.id;
+    saveSettings();
+    saveChatMetadata();
+
+    toastr.success(`${MODULE_NAME}: created entry and attached it to the current chat.`);
+    refreshUI();
 }
 
-function bindCheckbox(selector, key) {
-    $(selector).on('change', function () {
-        updateDraftField(key, Boolean($(this).prop('checked')));
-    });
+function deleteSelectedProfile() {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
+
+    const settings = ensureSettings();
+    settings.profiles = settings.profiles.filter(p => p.id !== profile.id);
+
+    if (getMetadataBucket().profileId === profile.id) {
+        delete getMetadataBucket().profileId;
+        saveChatMetadata();
+    }
+
+    if (settings.ui.selectedProfileId === profile.id) {
+        settings.ui.selectedProfileId = settings.profiles[0]?.id || '';
+    }
+
+    saveSettings();
+    toastr.info(`${MODULE_NAME}: deleted entry "${profile.entryName}".`);
+    refreshUI();
 }
 
-function initializeUiBindings() {
-    $('#aspect_destinia_entry_select').on('change', function () {
-        const settings = getSettings();
-        settings.activeEntryId = $(this).val();
-        saveSettingsDebounced();
-        loadDraftFromActiveEntry();
-    });
+function duplicateSelectedProfile() {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
 
-    $('#aspect_destinia_new_entry').on('click', createEntryForCurrentChat);
-    $('#aspect_destinia_duplicate_entry').on('click', duplicateActiveEntry);
-    $('#aspect_destinia_delete_entry').on('click', deleteActiveEntry);
-    $('#aspect_destinia_save_entry').on('click', saveDraftToActiveEntry);
-    $('#aspect_destinia_bind_selected_chat').on('click', bindActiveEntryToSelectedChat);
-    $('#aspect_destinia_bind_current_chat').on('click', bindActiveEntryToCurrentChat);
+    const copy = structuredClone(profile);
+    copy.id = makeId('entry');
+    copy.entryName = `${profile.entryName} (Copy)`;
 
-    bindInput('#aspect_destinia_entry_name', 'name', v => String(v || '').trimStart());
-    bindCheckbox('#aspect_destinia_enabled', 'enabled');
-    bindCheckbox('#aspect_destinia_auto_evaluate', 'autoEvaluate');
-    bindCheckbox('#aspect_destinia_auto_advance', 'autoAdvance');
-    bindCheckbox('#aspect_destinia_hold', 'hold');
-    bindCheckbox('#aspect_destinia_show_next', 'showNextBeat');
-    bindInput('#aspect_destinia_advancement_mode', 'advancementMode', v => String(v));
-    bindInput('#aspect_destinia_completion_threshold', 'completionThreshold', v => Number(v));
-
-    bindInput('#aspect_destinia_story_title', 'storyTitle', v => String(v));
-    bindInput('#aspect_destinia_story_style', 'storyStyle', v => String(v));
-    bindInput('#aspect_destinia_timeline_text', 'timelineText', v => String(v));
-
-    bindInput('#aspect_destinia_instruction_preamble', 'instructionPreamble', v => String(v));
-    bindInput('#aspect_destinia_instruction_story_style', 'instructionStoryStyle', v => String(v));
-    bindInput('#aspect_destinia_instruction_current_beat', 'instructionCurrentBeat', v => String(v));
-    bindInput('#aspect_destinia_instruction_hints_mode', 'instructionHintsMode', v => String(v));
-    bindInput('#aspect_destinia_instruction_objectives_mode', 'instructionObjectivesMode', v => String(v));
-    bindInput('#aspect_destinia_instruction_user_advance', 'instructionUserAdvance', v => String(v));
-    bindInput('#aspect_destinia_instruction_user_delay', 'instructionUserDelay', v => String(v));
-    bindInput('#aspect_destinia_instruction_transition', 'instructionTransition', v => String(v));
-    bindInput('#aspect_destinia_instruction_next_beat', 'instructionNextBeat', v => String(v));
-    bindInput('#aspect_destinia_instruction_hold', 'instructionHold', v => String(v));
-    bindInput('#aspect_destinia_instruction_do_not_expose', 'instructionDoNotExpose', v => String(v));
-    bindInput('#aspect_destinia_evaluator_instruction', 'evaluatorInstruction', v => String(v));
+    getProfiles().push(copy);
+    setSelectedProfileId(copy.id);
+    saveSettings();
+    toastr.success(`${MODULE_NAME}: duplicated entry.`);
+    refreshUI();
 }
 
-const refreshChatDropdownDebounced = debounce(() => {
-    refreshChatDropdown();
-}, 250);
+function attachSelectedProfileToCurrentChat() {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
 
-function initializeEvents() {
-    const ctx = getContext();
-    const eventSource = ctx.eventSource;
-    const eventTypes = ctx.event_types;
+    registerKnownChat();
 
-    eventSource.on(eventTypes.CHAT_CHANGED, () => {
-        autoSelectEntryForCurrentChat();
-        refreshEntryDropdown();
-        loadDraftFromActiveEntry();
-        refreshChatDropdownDebounced();
+    profile.attachedChatKey = getChatKey();
+    profile.attachedChatLabel = getChatLabel();
+    persistProfile(profile);
+
+    const metadata = getMetadataBucket();
+    metadata.profileId = profile.id;
+    saveChatMetadata();
+
+    toastr.success(`${MODULE_NAME}: attached selected entry to the current chat.`);
+    refreshUI();
+}
+
+function getDisplayedProfile() {
+    const selectedId = $('#aspect_destinia_profile_select').val() || getLinkedProfileIdForCurrentChat() || getSelectedProfileId();
+    if (!selectedId) return null;
+    setSelectedProfileId(selectedId);
+    return getProfileById(selectedId);
+}
+
+function profileToForm(profile) {
+    if (!profile) {
+        clearForm();
+        return;
+    }
+
+    $('#aspect_destinia_profile_select').val(profile.id);
+    $('#aspect_destinia_entry_name').val(profile.entryName || '');
+    $('#aspect_destinia_enabled').prop('checked', !!profile.enabled);
+    $('#aspect_destinia_mode').val(profile.advancementMode || 'objectives');
+    $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
+    $('#aspect_destinia_foreshadow').prop('checked', !!profile.foreshadowNextBeat);
+    $('#aspect_destinia_respect_intent').prop('checked', !!profile.respectUserIntent);
+    $('#aspect_destinia_strictness').val(profile.strictness ?? 0.55);
+    $('#aspect_destinia_pacing').val(profile.pacingBias ?? 0.45);
+    $('#aspect_destinia_threshold').val(profile.transitionThreshold ?? 0.72);
+    $('#aspect_destinia_window').val(profile.intentWindow ?? 8);
+    $('#aspect_destinia_chat_select').val(profile.attachedChatKey || '');
+    $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
+
+    $('#aspect_destinia_prompt_intro').val(profile.prompts.injectionIntro || '');
+    $('#aspect_destinia_prompt_principles').val(profile.prompts.guidancePrinciples || '');
+    $('#aspect_destinia_prompt_current').val(profile.prompts.currentBeatTemplate || '');
+    $('#aspect_destinia_prompt_objectives').val(profile.prompts.objectiveModeTemplate || '');
+    $('#aspect_destinia_prompt_hints').val(profile.prompts.hintModeTemplate || '');
+    $('#aspect_destinia_prompt_next').val(profile.prompts.nextBeatTemplate || '');
+    $('#aspect_destinia_prompt_linger').val(profile.prompts.lingerInstruction || '');
+    $('#aspect_destinia_prompt_advance').val(profile.prompts.advanceInstruction || '');
+    $('#aspect_destinia_prompt_pacing').val(profile.prompts.pacingInstruction || '');
+    $('#aspect_destinia_prompt_evaluator').val(profile.prompts.evaluatorPrompt || '');
+
+    renderStatus(profile);
+}
+
+function clearForm() {
+    $('#aspect_destinia_entry_name').val('');
+    $('#aspect_destinia_enabled').prop('checked', true);
+    $('#aspect_destinia_mode').val('objectives');
+    $('#aspect_destinia_auto_advance').prop('checked', true);
+    $('#aspect_destinia_foreshadow').prop('checked', true);
+    $('#aspect_destinia_respect_intent').prop('checked', true);
+    $('#aspect_destinia_strictness').val(0.55);
+    $('#aspect_destinia_pacing').val(0.45);
+    $('#aspect_destinia_threshold').val(0.72);
+    $('#aspect_destinia_window').val(8);
+    $('#aspect_destinia_chat_select').val('');
+    $('#aspect_destinia_timeline').val(JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
+}
+
+function formToProfile(profile) {
+    const parsedTimeline = safeParseTimeline($('#aspect_destinia_timeline').val());
+    if (!parsedTimeline) {
+        throw new Error('Timeline JSON must be valid and include plotPoints[].');
+    }
+
+    profile.entryName = $('#aspect_destinia_entry_name').val().trim() || 'Untitled Entry';
+    profile.enabled = $('#aspect_destinia_enabled').is(':checked');
+    profile.advancementMode = $('#aspect_destinia_mode').val();
+    profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
+    profile.foreshadowNextBeat = $('#aspect_destinia_foreshadow').is(':checked');
+    profile.respectUserIntent = $('#aspect_destinia_respect_intent').is(':checked');
+    profile.strictness = Number($('#aspect_destinia_strictness').val() || 0.55);
+    profile.pacingBias = Number($('#aspect_destinia_pacing').val() || 0.45);
+    profile.transitionThreshold = Number($('#aspect_destinia_threshold').val() || 0.72);
+    profile.intentWindow = Number($('#aspect_destinia_window').val() || 8);
+
+    const selectedChatKey = $('#aspect_destinia_chat_select').val() || '';
+    const knownChat = ensureSettings().knownChats.find(x => x.key === selectedChatKey);
+    profile.attachedChatKey = selectedChatKey;
+    profile.attachedChatLabel = knownChat?.label || profile.attachedChatLabel || '';
+
+    profile.timelineText = $('#aspect_destinia_timeline').val();
+    profile.timeline = parsedTimeline;
+
+    profile.prompts.injectionIntro = $('#aspect_destinia_prompt_intro').val();
+    profile.prompts.guidancePrinciples = $('#aspect_destinia_prompt_principles').val();
+    profile.prompts.currentBeatTemplate = $('#aspect_destinia_prompt_current').val();
+    profile.prompts.objectiveModeTemplate = $('#aspect_destinia_prompt_objectives').val();
+    profile.prompts.hintModeTemplate = $('#aspect_destinia_prompt_hints').val();
+    profile.prompts.nextBeatTemplate = $('#aspect_destinia_prompt_next').val();
+    profile.prompts.lingerInstruction = $('#aspect_destinia_prompt_linger').val();
+    profile.prompts.advanceInstruction = $('#aspect_destinia_prompt_advance').val();
+    profile.prompts.pacingInstruction = $('#aspect_destinia_prompt_pacing').val();
+    profile.prompts.evaluatorPrompt = $('#aspect_destinia_prompt_evaluator').val();
+
+    const totalBeats = profile.timeline.plotPoints.length;
+    if (profile.state.currentIndex >= totalBeats) {
+        profile.state.currentIndex = Math.max(0, totalBeats - 1);
+    }
+}
+
+function saveDisplayedProfile() {
+    const profile = getDisplayedProfile();
+    if (!profile) {
+        toastr.warning(`${MODULE_NAME}: create an entry first.`);
+        return;
+    }
+
+    try {
+        formToProfile(profile);
+        persistProfile(profile);
+
+        if (profile.attachedChatKey === getChatKey()) {
+            getMetadataBucket().profileId = profile.id;
+            saveChatMetadata();
+        }
+
+        toastr.success(`${MODULE_NAME}: saved settings to "${profile.entryName}".`);
+        refreshUI();
+    } catch (err) {
+        toastr.error(`${MODULE_NAME}: ${err.message}`);
+    }
+}
+
+function resetCurrentBeatToFirst() {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
+    profile.state.currentIndex = 0;
+    profile.state.lastIntentDecision = 'stay';
+    profile.state.lastIntentReason = 'Manually reset to the first beat.';
+    persistProfile(profile);
+    toastr.info(`${MODULE_NAME}: reset current beat to the first plot point.`);
+    refreshUI();
+}
+
+function stepBeat(delta) {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
+
+    const timeline = getActiveTimeline(profile);
+    const max = Math.max(0, (timeline?.plotPoints?.length || 1) - 1);
+    profile.state.currentIndex = Math.max(0, Math.min(max, (profile.state.currentIndex || 0) + delta));
+    profile.state.lastIntentReason = `Manually adjusted current beat to index ${profile.state.currentIndex + 1}.`;
+    persistProfile(profile);
+    refreshUI();
+}
+
+function renderStatus(profile) {
+    const current = getCurrentBeat(profile);
+    const next = getNextBeat(profile);
+    const linked = getLinkedProfileIdForCurrentChat();
+    const isActiveForChat = linked && profile?.id === linked;
+
+    $('#aspect_destinia_status').html(`
+        <div class="aspect-destinia-status-grid">
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Current Chat</div>
+                <div class="aspect-destinia-stat-value">${escapeHtml(getChatLabel())}</div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Active Entry for Chat</div>
+                <div class="aspect-destinia-stat-value">${isActiveForChat ? 'Yes' : 'No'}</div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Current Beat</div>
+                <div class="aspect-destinia-stat-value">${escapeHtml(current?.title || 'None')}</div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Next Beat</div>
+                <div class="aspect-destinia-stat-value">${escapeHtml(next?.title || 'None')}</div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Last Intent</div>
+                <div class="aspect-destinia-stat-value">${escapeHtml(profile?.state?.lastIntentDecision || 'stay')}</div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Last Confidence</div>
+                <div class="aspect-destinia-stat-value">${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)}</div>
+            </div>
+        </div>
+        <div class="aspect-destinia-status-reason">
+            ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}
+        </div>
+    `);
+}
+
+function escapeHtml(text) {
+    return String(text ?? '').replace(/[&<>"']/g, s => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[s]));
+}
+
+function renderProfileOptions() {
+    const profiles = getProfiles();
+    const select = $('#aspect_destinia_profile_select');
+    const activeId = getLinkedProfileIdForCurrentChat() || getSelectedProfileId() || profiles[0]?.id || '';
+
+    select.empty();
+    select.append(`<option value="">-- Select Entry --</option>`);
+    for (const profile of profiles) {
+        select.append(`<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.entryName)}</option>`);
+    }
+    select.val(activeId);
+}
+
+function renderKnownChatOptions() {
+    registerKnownChat();
+
+    const knownChats = ensureSettings().knownChats;
+    const select = $('#aspect_destinia_chat_select');
+    const currentProfile = getDisplayedProfile();
+
+    select.empty();
+    select.append(`<option value="">-- No Attached Chat --</option>`);
+    for (const chat of knownChats) {
+        select.append(`<option value="${escapeHtml(chat.key)}">${escapeHtml(chat.label)}</option>`);
+    }
+
+    if (currentProfile?.attachedChatKey) {
+        select.val(currentProfile.attachedChatKey);
+    } else {
+        select.val(getChatKey());
+    }
+}
+
+function refreshUI() {
+    if (!document.getElementById(ROOT_ID)) return;
+
+    renderProfileOptions();
+    renderKnownChatOptions();
+
+    const profile = getDisplayedProfile() || getActiveProfile();
+    if (profile) {
+        profileToForm(profile);
+    } else {
+        clearForm();
+        $('#aspect_destinia_status').html('<div class="aspect-destinia-empty">No entry selected. Create one to bind story progression to this chat.</div>');
+    }
+
+    updateSliderDisplays();
+}
+
+function updateSliderDisplays() {
+    $('#aspect_destinia_strictness_value').text(Number($('#aspect_destinia_strictness').val() || 0).toFixed(2));
+    $('#aspect_destinia_pacing_value').text(Number($('#aspect_destinia_pacing').val() || 0).toFixed(2));
+    $('#aspect_destinia_threshold_value').text(Number($('#aspect_destinia_threshold').val() || 0).toFixed(2));
+}
+
+function buildSettingsHtml() {
+    return `
+    <div id="${ROOT_ID}" class="aspect-destinia">
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>Aspect: Destinia</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <div class="aspect-destinia-panel">
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-toolbar">
+                            <div class="aspect-destinia-field aspect-destinia-grow">
+                                <label class="aspect-destinia-label">Entry</label>
+                                <select id="aspect_destinia_profile_select"></select>
+                            </div>
+                            <button id="aspect_destinia_create" class="menu_button">Create Entry for Current Chat</button>
+                            <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Entry</button>
+                            <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Entry</button>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Entry Name</label>
+                                <input id="aspect_destinia_entry_name" type="text" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Attached Chat</label>
+                                <div class="aspect-destinia-inline">
+                                    <select id="aspect_destinia_chat_select"></select>
+                                    <button id="aspect_destinia_attach_current" class="menu_button">Use Current Chat</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid three">
+                            <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Enabled</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-advance when ready</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow next beat</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect user lingering intent</label>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Advancement Mode</label>
+                                <select id="aspect_destinia_mode">
+                                    <option value="objectives">Objective-based rules</option>
+                                    <option value="hints">Simple completion hints</option>
+                                </select>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Intent Window</label>
+                                <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid three sliders">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Strictness <span id="aspect_destinia_strictness_value"></span></label>
+                                <input id="aspect_destinia_strictness" type="range" min="0" max="1" step="0.01" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Pacing Bias <span id="aspect_destinia_pacing_value"></span></label>
+                                <input id="aspect_destinia_pacing" type="range" min="0" max="1" step="0.01" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Transition Threshold <span id="aspect_destinia_threshold_value"></span></label>
+                                <input id="aspect_destinia_threshold" type="range" min="0.5" max="0.95" step="0.01" />
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Entry</button>
+                            <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
+                            <button id="aspect_destinia_eval" class="menu_button">Run Intent Check Now</button>
+                            <button id="aspect_destinia_prev" class="menu_button">Previous Beat</button>
+                            <button id="aspect_destinia_next" class="menu_button">Next Beat</button>
+                            <button id="aspect_destinia_reset_beat" class="menu_button">Reset to First Beat</button>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Status</div>
+                        <div id="aspect_destinia_status"></div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Timeline JSON</div>
+                        <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Injected Guidance Fields</div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Injection Intro</label>
+                            <textarea id="aspect_destinia_prompt_intro"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Guidance Principles</label>
+                            <textarea id="aspect_destinia_prompt_principles"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Current Beat Template</label>
+                                <textarea id="aspect_destinia_prompt_current"></textarea>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Next Beat Template</label>
+                                <textarea id="aspect_destinia_prompt_next"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Objective Mode Template</label>
+                                <textarea id="aspect_destinia_prompt_objectives"></textarea>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Hint Mode Template</label>
+                                <textarea id="aspect_destinia_prompt_hints"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Linger Instruction</label>
+                                <textarea id="aspect_destinia_prompt_linger"></textarea>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Advance Instruction</label>
+                                <textarea id="aspect_destinia_prompt_advance"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Pacing Instruction</label>
+                            <textarea id="aspect_destinia_prompt_pacing"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Intent Evaluator Prompt</label>
+                            <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function bindUI() {
+    $('#aspect_destinia_profile_select').on('change', () => {
+        const profileId = $('#aspect_destinia_profile_select').val();
+        setSelectedProfileId(profileId);
+        const profile = getProfileById(profileId);
+        profileToForm(profile);
     });
 
-    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED, async () => {
-        updatePrompt();
-        await maybeEvaluateProgress();
+    $('#aspect_destinia_create').on('click', createProfileAttachedToCurrentChat);
+    $('#aspect_destinia_duplicate').on('click', duplicateSelectedProfile);
+    $('#aspect_destinia_delete').on('click', deleteSelectedProfile);
+    $('#aspect_destinia_attach_current').on('click', attachSelectedProfileToCurrentChat);
+    $('#aspect_destinia_save').on('click', saveDisplayedProfile);
+
+    $('#aspect_destinia_validate').on('click', () => {
+        const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
+        if (parsed) {
+            toastr.success(`${MODULE_NAME}: timeline JSON is valid.`);
+        } else {
+            toastr.error(`${MODULE_NAME}: invalid timeline JSON.`);
+        }
     });
 
-    eventSource.on(eventTypes.MESSAGE_EDITED, async () => {
-        updatePrompt();
-        await maybeEvaluateProgress();
+    $('#aspect_destinia_eval').on('click', async () => {
+        await evaluateIntentIfNeeded('manual');
+        refreshUI();
     });
 
-    eventSource.on(eventTypes.MESSAGE_SWIPED, async () => {
-        updatePrompt();
-        await maybeEvaluateProgress();
-    });
+    $('#aspect_destinia_prev').on('click', () => stepBeat(-1));
+    $('#aspect_destinia_next').on('click', () => stepBeat(1));
+    $('#aspect_destinia_reset_beat').on('click', resetCurrentBeatToFirst);
 
-    eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => {
-        updatePrompt();
+    $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold').on('input', updateSliderDisplays);
+}
+
+function renderRoot() {
+    if (document.getElementById(ROOT_ID)) return;
+    $('#extensions_settings').append(buildSettingsHtml());
+    bindUI();
+    refreshUI();
+}
+
+function onChatChanged() {
+    registerKnownChat();
+    refreshUI();
+}
+
+function bindEvents() {
+    const ctx = getCtx();
+    ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, onChatChanged);
+    ctx.eventSource.on(ctx.event_types.MESSAGE_SENT, async () => {
+        await evaluateIntentIfNeeded('user message');
+    });
+    ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
+        await evaluateIntentIfNeeded('assistant message');
+    });
+    ctx.eventSource.on(ctx.event_types.APP_READY, () => {
+        renderRoot();
     });
 }
 
 jQuery(async () => {
-    log('Loading...');
     ensureSettings();
-    await loadSettingsHtml();
+    registerKnownChat();
+    renderRoot();
+    bindEvents();
 
-    if (!Object.keys(getEntries()).length) {
-        const initial = buildEntryFromDefaults();
-        initial.name = 'Default Entry';
-        initial.boundChatKey = getCurrentChatKey();
-        initial.boundChatLabel = getCurrentChatLabel();
-        getSettings().entries[initial.id] = initial;
-        getSettings().activeEntryId = initial.id;
-        saveSettingsDebounced();
+    const linkedId = getLinkedProfileIdForCurrentChat();
+    if (linkedId) {
+        setSelectedProfileId(linkedId);
     }
 
-    autoSelectEntryForCurrentChat();
-    initializeUiBindings();
-    ui.ready = true;
-    loadDraftFromActiveEntry();
-    initializeEvents();
-    updatePrompt();
-    refreshChatDropdown();
-    log('Ready.');
+    refreshUI();
+    console.log(`[${MODULE_NAME}] loaded`);
 });
