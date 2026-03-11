@@ -1,6 +1,7 @@
 const MODULE_ID = 'st-aspect-destinia';
 const MODULE_NAME = 'Aspect: Destinia';
 const ROOT_ID = 'aspect_destinia_root';
+const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
 
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
@@ -298,6 +299,7 @@ function getSelectedProfileId() {
 function setSelectedProfileId(profileId) {
     ensureSettings().ui.selectedProfileId = profileId || '';
     saveSettings();
+    updateExtensionPrompt();
 }
 
 function getLinkedProfileIdForCurrentChat() {
@@ -426,47 +428,41 @@ function buildInjection(profile) {
     return chunks.filter(Boolean).join('\n\n');
 }
 
-function buildSystemNote(injectionText) {
-    return {
-        is_user: false,
-        name: 'System',
-        send_date: Date.now(),
-        mes: `[${MODULE_NAME}]\n${injectionText}`,
-        extra: {
-            type: 'system',
-            aspectDestinia: true
-        }
-    };
-}
-
-function insertInterceptorNote(chat, injectionText) {
-    if (!injectionText || !Array.isArray(chat) || chat.length === 0) return;
-
-    const note = buildSystemNote(injectionText);
-    const lastUserIndex = [...chat].reverse().findIndex(m => m?.is_user);
-    if (lastUserIndex === -1) {
-        chat.push(note);
-        return;
-    }
-
-    const absoluteIndex = chat.length - 1 - lastUserIndex;
-    chat.splice(absoluteIndex, 0, note);
-}
-
-async function aspectDestiniaInterceptor(chat, contextSize, abort, type) {
+function updateExtensionPrompt() {
     try {
-        if (type === 'quiet') return;
-
+        const ctx = getCtx();
         const profile = getActiveProfile();
-        if (!profile?.enabled) return;
+
+        if (!profile?.enabled) {
+            if (typeof ctx.setExtensionPrompt === 'function') {
+                ctx.setExtensionPrompt(EXTENSION_PROMPT_KEY, '');
+            }
+            return;
+        }
 
         const injection = buildInjection(profile);
-        insertInterceptorNote(chat, injection);
+
+        if (typeof ctx.setExtensionPrompt !== 'function') {
+            console.warn(`[${MODULE_NAME}] setExtensionPrompt is not available in this build.`);
+            return;
+        }
+
+        /*
+         Use a stable, low-conflict insertion strategy.
+         The exact numeric position can be adjusted later if needed,
+         but this should work as a normal extension prompt.
+         */
+        ctx.setExtensionPrompt(
+            EXTENSION_PROMPT_KEY,
+            injection,
+            0,
+            0,
+            false
+        );
     } catch (err) {
-        console.error(`[${MODULE_NAME}] Interceptor failed`, err);
+        console.error(`[${MODULE_NAME}] Failed to update extension prompt`, err);
     }
 }
-globalThis.aspectDestiniaInterceptor = aspectDestiniaInterceptor;
 
 function chatHash(limit = 8) {
     const ctx = getCtx();
@@ -518,6 +514,8 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
             profile.state.lastIntentConfidence = 0;
             profile.state.lastIntentReason = 'Evaluation returned non-JSON; defaulted to stay.';
             persistProfile(profile);
+            updateExtensionPrompt();
+            refreshUI();
             return;
         }
 
@@ -551,12 +549,15 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
         }
 
         persistProfile(profile);
+        updateExtensionPrompt();
         refreshUI();
     } catch (err) {
         console.warn(`[${MODULE_NAME}] Intent evaluation failed`, err);
         profile.state.lastIntentDecision = 'stay';
         profile.state.lastIntentReason = `Evaluation failed: ${err.message}`;
         persistProfile(profile);
+        updateExtensionPrompt();
+        refreshUI();
     }
 }
 
@@ -587,6 +588,7 @@ function persistProfile(profile) {
     if (idx !== -1) {
         profiles[idx] = profile;
         saveSettings();
+        updateExtensionPrompt();
     }
 }
 
@@ -611,6 +613,7 @@ function createProfileAttachedToCurrentChat() {
     saveSettings();
     saveChatMetadata();
 
+    updateExtensionPrompt();
     toastr.success(`${MODULE_NAME}: created entry and attached it to the current chat.`);
     refreshUI();
 }
@@ -665,6 +668,7 @@ function attachSelectedProfileToCurrentChat() {
     metadata.profileId = profile.id;
     saveChatMetadata();
 
+    updateExtensionPrompt();
     toastr.success(`${MODULE_NAME}: attached selected entry to the current chat.`);
     refreshUI();
 }
@@ -783,6 +787,7 @@ function saveDisplayedProfile() {
             saveChatMetadata();
         }
 
+        updateExtensionPrompt();
         toastr.success(`${MODULE_NAME}: saved settings to "${profile.entryName}".`);
         refreshUI();
     } catch (err) {
@@ -797,6 +802,7 @@ function resetCurrentBeatToFirst() {
     profile.state.lastIntentDecision = 'stay';
     profile.state.lastIntentReason = 'Manually reset to the first beat.';
     persistProfile(profile);
+    updateExtensionPrompt();
     toastr.info(`${MODULE_NAME}: reset current beat to the first plot point.`);
     refreshUI();
 }
@@ -810,6 +816,7 @@ function stepBeat(delta) {
     profile.state.currentIndex = Math.max(0, Math.min(max, (profile.state.currentIndex || 0) + delta));
     profile.state.lastIntentReason = `Manually adjusted current beat to index ${profile.state.currentIndex + 1}.`;
     persistProfile(profile);
+    updateExtensionPrompt();
     refreshUI();
 }
 
@@ -910,6 +917,7 @@ function refreshUI() {
     }
 
     updateSliderDisplays();
+    updateExtensionPrompt();
 }
 
 function updateSliderDisplays() {
@@ -1115,6 +1123,7 @@ function renderRoot() {
 function onChatChanged() {
     registerKnownChat();
     refreshUI();
+    updateExtensionPrompt();
 }
 
 function bindEvents() {
@@ -1143,5 +1152,6 @@ jQuery(async () => {
     }
 
     refreshUI();
+    updateExtensionPrompt();
     console.log(`[${MODULE_NAME}] loaded`);
 });

@@ -10,6 +10,5 @@
   "version": "0.2.0",
   "homePage": "https://github.com/Vectricity/st-aspect-destinia",
   "auto_update": false,
-  "minimum_client_version": "1.12.0",
-  "generate_interceptor": "aspectDestiniaInterceptor"
+  "minimum_client_version": "1.12.0"
 }
