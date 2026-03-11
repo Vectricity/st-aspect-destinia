@@ -448,6 +448,11 @@ function updateExtensionPrompt() {
             return;
         }
 
+        const promptTypes = ctx.extensionPromptTypes || SillyTavern.extensionPromptTypes || {};
+        const promptRoles = ctx.extensionPromptRoles || SillyTavern.extensionPromptRoles || {};
+        const inPromptType = promptTypes.IN_PROMPT ?? 0;
+        const systemRole = promptRoles.SYSTEM ?? 0;
+
         /*
          Use a stable, low-conflict insertion strategy.
          The exact numeric position can be adjusted later if needed,
@@ -456,9 +461,10 @@ function updateExtensionPrompt() {
         ctx.setExtensionPrompt(
             EXTENSION_PROMPT_KEY,
             injection,
+            inPromptType,
             0,
-            0,
-            false
+            false,
+            systemRole
         );
     } catch (err) {
         console.error(`[${MODULE_NAME}] Failed to update extension prompt`, err);
@@ -593,7 +599,8 @@ async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatTex
         const message = String(err?.message || err || '');
         const degradedFunctionError =
             message.includes('DEGRADED function cannot be invoked') ||
-            (message.includes('Function id') && message.includes('Bad Request'));
+            (message.includes('Function id') && message.includes('Bad Request')) ||
+            message.includes('System message must be at the beginning');
 
         if (degradedFunctionError) {
             remoteIntentEvalDisabled = true;
