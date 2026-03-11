@@ -2,6 +2,7 @@ const MODULE_ID = 'st-aspect-destinia';
 const MODULE_NAME = 'Aspect: Destinia';
 const ROOT_ID = 'aspect_destinia_root';
 const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
+let remoteIntentEvalDisabled = false;
 
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
@@ -506,8 +507,7 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
     const prompt = replaceMacros(profile.prompts.evaluatorPrompt || '', data);
 
     try {
-        const result = await ctx.generateQuietPrompt({ quietPrompt: prompt });
-        const parsed = parseJsonObject(result);
+        const parsed = await evaluateIntentModelOrFallback(ctx, prompt, profile, data.recent_chat);
 
         if (!parsed) {
             profile.state.lastIntentDecision = 'stay';
@@ -575,6 +575,83 @@ function parseJsonObject(text) {
             return null;
         }
     }
+}
+
+async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatText) {
+    if (remoteIntentEvalDisabled) {
+        return evaluateIntentLocally(profile, recentChatText);
+    }
+
+    try {
+        const result = await ctx.generateQuietPrompt({ quietPrompt: prompt });
+        const parsed = parseJsonObject(result);
+        if (!parsed) {
+            return null;
+        }
+        return parsed;
+    } catch (err) {
+        const message = String(err?.message || err || '');
+        const degradedFunctionError =
+            message.includes('DEGRADED function cannot be invoked') ||
+            (message.includes('Function id') && message.includes('Bad Request'));
+
+        if (degradedFunctionError) {
+            remoteIntentEvalDisabled = true;
+            toastr.warning(`${MODULE_NAME}: intent evaluator switched to local fallback due to backend function-tool availability.`);
+            return evaluateIntentLocally(profile, recentChatText);
+        }
+
+        throw err;
+    }
+}
+
+function evaluateIntentLocally(profile, recentChatText) {
+    const text = String(recentChatText || '').toLowerCase();
+    const userLines = text
+        .split('\n')
+        .filter(line => line.toLowerCase().includes('user:'))
+        .slice(-3)
+        .join(' ');
+
+    const advanceSignals = [
+        'next', 'move on', 'continue', 'let\'s go', 'lets go', 'head to', 'after this',
+        'done here', 'finished', 'resolve this', 'leave', 'proceed', 'advance'
+    ];
+    const lingerSignals = [
+        'wait', 'hold on', 'stay', 'linger', 'talk more', 'investigate', 'look around',
+        'reflect', 'train', 'not yet', 'before we go', 'keep exploring'
+    ];
+
+    const advanceHits = advanceSignals.filter(s => userLines.includes(s)).length;
+    const lingerHits = lingerSignals.filter(s => userLines.includes(s)).length;
+
+    let decision = 'stay';
+    let confidence = 0.55;
+    let reason = 'Local fallback evaluator found no strong progression signal.';
+
+    if (advanceHits > lingerHits) {
+        decision = 'advance';
+        confidence = Math.min(0.9, 0.62 + (advanceHits * 0.08));
+        reason = 'Local fallback evaluator detected forward-progress wording from the user.';
+    } else if (lingerHits > 0) {
+        decision = 'stay';
+        confidence = Math.min(0.9, 0.65 + (lingerHits * 0.07));
+        reason = 'Local fallback evaluator detected linger/deepen wording from the user.';
+    }
+
+    const currentBeat = getCurrentBeat(profile);
+    const hints = Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [];
+    const beatComplete = hints.length > 0
+        ? hints.some(h => userLines.includes(String(h).toLowerCase().slice(0, 24))) || decision === 'advance'
+        : decision === 'advance';
+
+    return {
+        decision,
+        confidence,
+        reason,
+        beat_complete: beatComplete,
+        user_wants_to_linger: lingerHits > advanceHits
+    };
 }
 
 function clamp01(n) {
