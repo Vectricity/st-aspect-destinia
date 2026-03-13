@@ -2,7 +2,9 @@ const MODULE_ID = 'st-aspect-destinia';
 const MODULE_NAME = 'Aspect: Destinia';
 const ROOT_ID = 'aspect_destinia_root';
 const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
-let remoteIntentEvalDisabled = false;
+// Default to local evaluation to avoid backend tool-calling failures
+// (e.g. "DEGRADED function cannot be invoked") surfacing to end users.
+let remoteIntentEvalDisabled = true;
 
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
