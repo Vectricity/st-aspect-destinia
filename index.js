@@ -693,18 +693,26 @@ function buildDiagnosticBoxHtml(profile) {
     const diag = profile?.state?.lastDiagnostic || {};
     const infoUsed = [];
     if (Array.isArray(diag.currentBeatObjectives) && diag.currentBeatObjectives.length) {
-        infoUsed.push(`Objectives: ${diag.currentBeatObjectives.join(' | ')}`);
+        const objectivesHtml = diag.currentBeatObjectives
+            .map(item => {
+                const objective = normalizeObjectiveItem(item);
+                const icon = objective.completed ? '☑' : '☐';
+                return `<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-icon" aria-hidden="true">${icon}</span> <span>${escapeHtml(objective.text || 'Untitled objective')}</span></div>`;
+            })
+            .join('');
+        infoUsed.push(`<div><b>Objectives:</b></div><div class="aspect-destinia-diagnostic-objectives">${objectivesHtml}</div>`);
     }
     if (Array.isArray(diag.currentBeatHints) && diag.currentBeatHints.length) {
-        infoUsed.push(`Completion hints: ${diag.currentBeatHints.join(' | ')}`);
+        infoUsed.push(`<div><b>Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
     }
     if (diag.recentChat) {
-        infoUsed.push(`Recent chat window (${profile.intentWindow || 8} lines): ${diag.recentChat}`);
+        infoUsed.push(`<div><b>Recent chat window (${profile.intentWindow || 8} lines):</b> ${escapeHtml(diag.recentChat)}</div>`);
     }
 
     return `
-        <div class="aspect-destinia-diagnostic-box" data-collapsed="false">
-            <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-clock"></i></button>
+        <div class="aspect-destinia-diagnostic-container" data-collapsed="true">
+            <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-hourglass-half"></i></button>
+            <div class="aspect-destinia-diagnostic-box">
             <div class="aspect-destinia-diagnostic-content">
                 <div class="aspect-destinia-diagnostic-title">Aspect: Destinia Diagnostic (dev)</div>
                 <div><b>Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
@@ -713,8 +721,9 @@ function buildDiagnosticBoxHtml(profile) {
                 <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
                 <details>
                     <summary><b>Information used for this response</b></summary>
-                    <div class="aspect-destinia-diagnostic-body">${escapeHtml(infoUsed.join('\n\n') || 'No diagnostics captured yet.')}</div>
+                    <div class="aspect-destinia-diagnostic-body">${infoUsed.join('') || 'No diagnostics captured yet.'}</div>
                 </details>
+            </div>
             </div>
         </div>
     `;
@@ -726,7 +735,7 @@ function renderDiagnosticForLatestAssistantMessage() {
     const el = findLatestAssistantMessageElement();
     if (!el) return;
 
-    el.querySelectorAll('.aspect-destinia-diagnostic-box').forEach(x => x.remove());
+    el.querySelectorAll('.aspect-destinia-diagnostic-container').forEach(x => x.remove());
 
     const messageBody =
         el.querySelector('.mes_text')
@@ -736,7 +745,7 @@ function renderDiagnosticForLatestAssistantMessage() {
 
     messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
 
-    const inserted = messageBody.querySelector('.aspect-destinia-diagnostic-box:last-of-type');
+    const inserted = messageBody.querySelector('.aspect-destinia-diagnostic-container:last-of-type');
     const toggle = inserted?.querySelector('.aspect-destinia-diagnostic-toggle');
     toggle?.addEventListener('click', () => {
         const collapsed = inserted.getAttribute('data-collapsed') === 'true';
@@ -1296,6 +1305,7 @@ function buildSettingsHtml() {
                                 </div>
                                 <div id="aspect_destinia_entry_name_display" class="aspect-destinia-entry-name-display"></div>
                             </div>
+                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Entry</button>
                             <button id="aspect_destinia_create" class="menu_button">Create Entry for Current Chat</button>
                             <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Entry</button>
                             <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Entry</button>
@@ -1350,7 +1360,6 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Entry</button>
                             <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
                             <button id="aspect_destinia_eval" class="menu_button">Run Intent Check Now</button>
                             <button id="aspect_destinia_prev" class="menu_button">Previous Beat</button>
