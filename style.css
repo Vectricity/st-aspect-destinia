@@ -166,3 +166,80 @@
     word-break: break-word;
     opacity: 0.92;
 }
+#aspect_destinia_root .aspect-destinia-entry-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#aspect_destinia_root .aspect-destinia-select-wrap {
+    position: relative;
+    flex: 1;
+}
+
+#aspect_destinia_root .aspect-destinia-select-wrap select {
+    appearance: none;
+    padding-right: 32px;
+}
+
+#aspect_destinia_root .aspect-destinia-select-arrow {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    opacity: 0.8;
+    transition: transform 0.2s ease;
+}
+
+#aspect_destinia_root .aspect-destinia-select-wrap:focus-within .aspect-destinia-select-arrow {
+    transform: translateY(-50%) rotate(180deg);
+}
+
+#aspect_destinia_root .aspect-destinia-entry-name-display {
+    margin-top: 6px;
+    opacity: 0.85;
+    font-size: 0.9rem;
+}
+
+#aspect_destinia_root .aspect-destinia-hidden {
+    display: none;
+}
+
+#aspect_destinia_root .aspect-destinia-objective-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#aspect_destinia_root .aspect-destinia-objective-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#chat .aspect-destinia-diagnostic-box {
+    position: relative;
+    padding-top: 38px;
+}
+
+#chat .aspect-destinia-diagnostic-toggle {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 4px 7px;
+    cursor: pointer;
+}
+
+#chat .aspect-destinia-diagnostic-box[data-collapsed="true"] .aspect-destinia-diagnostic-content {
+    display: none;
+}
+
+#chat .aspect-destinia-diagnostic-box[data-collapsed="true"] {
+    padding: 10px;
+    width: fit-content;
+}
