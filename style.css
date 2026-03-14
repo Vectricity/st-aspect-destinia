@@ -219,11 +219,21 @@
     gap: 8px;
 }
 
+#aspect_destinia_root .aspect-destinia-objective-icon {
+    min-width: 1em;
+}
+
 #chat .aspect-destinia-diagnostic-container {
     margin-top: 10px;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    gap: 8px;
+}
+
+#chat .aspect-destinia-diagnostic-header {
+    display: flex;
+    align-items: center;
     gap: 8px;
 }
 
@@ -234,6 +244,15 @@
     border-radius: 8px;
     padding: 4px 7px;
     cursor: pointer;
+}
+
+#chat .aspect-destinia-diagnostic-timeline-label {
+    font-weight: 700;
+    color: #c2b280;
+}
+
+#chat .aspect-destinia-diagnostic-highlight {
+    color: #ffd84d;
 }
 
 #chat .aspect-destinia-diagnostic-container[data-collapsed="true"] .aspect-destinia-diagnostic-content {
