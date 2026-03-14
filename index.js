@@ -158,8 +158,10 @@ const DEFAULT_PROFILE = Object.freeze({
                 '  "confidence": 0.0,',
                 '  "reason": "short explanation",',
                 '  "beat_complete": true,',
-                '  "user_wants_to_linger": false',
+                '  "user_wants_to_linger": false,',
+                '  "objective_completion": [true, false]',
                 '}',
+                'Only set objective_completion items to true when the objective is complete based on the recent chat.',
                 '',
                 'Story title: {{story_title}}',
                 'Current beat: {{current_title}}',
@@ -599,6 +601,9 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         const confidence = clamp01(Number(parsed.confidence) || 0);
         const beatComplete = Boolean(parsed.beat_complete);
         const userWantsToLinger = Boolean(parsed.user_wants_to_linger);
+        const objectiveCompletion = Array.isArray(parsed.objective_completion)
+            ? parsed.objective_completion.map(Boolean)
+            : null;
 
         let finalDecision = decision;
         if (userWantsToLinger) finalDecision = 'stay';
@@ -609,6 +614,21 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         profile.state.lastIntentDecision = finalDecision;
         profile.state.lastIntentConfidence = confidence;
         profile.state.lastIntentReason = String(parsed.reason || 'No reason provided.');
+
+        if (objectiveCompletion && profile.advancementMode === 'objectives') {
+            const mutableCurrentBeat = getCurrentBeat(profile);
+            if (Array.isArray(mutableCurrentBeat?.objectives)) {
+                mutableCurrentBeat.objectives = mutableCurrentBeat.objectives.map((item, idx) => {
+                    const normalized = normalizeObjectiveItem(item);
+                    if (objectiveCompletion[idx]) {
+                        normalized.completed = true;
+                    }
+                    return normalized;
+                });
+                profile.timelineText = JSON.stringify(profile.timeline, null, 2);
+            }
+        }
+
         profile.state.lastDiagnostic = {
             updatedAt: Date.now(),
             trigger,
@@ -703,19 +723,18 @@ function buildDiagnosticBoxHtml(profile) {
         infoUsed.push(`<div><b>Objectives:</b></div><div class="aspect-destinia-diagnostic-objectives">${objectivesHtml}</div>`);
     }
     if (Array.isArray(diag.currentBeatHints) && diag.currentBeatHints.length) {
-        infoUsed.push(`<div><b>Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
-    }
-    if (diag.recentChat) {
-        infoUsed.push(`<div><b>Recent chat window (${profile.intentWindow || 8} lines):</b> ${escapeHtml(diag.recentChat)}</div>`);
+        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-highlight">Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
     }
 
     return `
         <div class="aspect-destinia-diagnostic-container" data-collapsed="true">
-            <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-hourglass-half"></i></button>
+            <div class="aspect-destinia-diagnostic-header">
+                <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-hourglass-half"></i></button>
+                <div class="aspect-destinia-diagnostic-timeline-label">Timeline (Diagnostics)</div>
+            </div>
             <div class="aspect-destinia-diagnostic-box">
             <div class="aspect-destinia-diagnostic-content">
-                <div class="aspect-destinia-diagnostic-title">Aspect: Destinia Diagnostic (dev)</div>
-                <div><b>Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-highlight">Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
                 <div><b>Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
                 <div><b>Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
                 <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
@@ -834,6 +853,13 @@ function evaluateIntentLocally(profile, recentChatText) {
 
     const currentBeat = getCurrentBeat(profile);
     const hints = Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [];
+    const objectives = Array.isArray(currentBeat?.objectives) ? currentBeat.objectives.map(normalizeObjectiveItem) : [];
+    const objectiveCompletion = objectives.map(objective => {
+        if (objective.completed) return true;
+        const objectiveNeedle = objective.text.toLowerCase().slice(0, 30);
+        if (objectiveNeedle && userLines.includes(objectiveNeedle)) return true;
+        return decision === 'advance';
+    });
     const beatComplete = hints.length > 0
         ? hints.some(h => userLines.includes(String(h).toLowerCase().slice(0, 24))) || decision === 'advance'
         : decision === 'advance';
@@ -843,7 +869,8 @@ function evaluateIntentLocally(profile, recentChatText) {
         confidence,
         reason,
         beat_complete: beatComplete,
-        user_wants_to_linger: lingerHits > advanceHits
+        user_wants_to_linger: lingerHits > advanceHits,
+        objective_completion: objectiveCompletion
     };
 }
 
@@ -1103,22 +1130,6 @@ function promptRenameEntry() {
     refreshUI();
 }
 
-function toggleObjectiveCompletion(objectiveIndex, checked) {
-    const profile = getDisplayedProfile();
-    if (!profile) return;
-    const current = getCurrentBeat(profile);
-    if (!current || !Array.isArray(current.objectives)) return;
-    const idx = Number(objectiveIndex);
-    if (!Number.isInteger(idx) || idx < 0 || idx >= current.objectives.length) return;
-    const normalized = normalizeObjectiveItem(current.objectives[idx]);
-    normalized.completed = Boolean(checked);
-    current.objectives[idx] = normalized;
-    profile.timelineText = JSON.stringify(profile.timeline, null, 2);
-    persistProfile(profile);
-    updateExtensionPrompt();
-    refreshUI();
-}
-
 function saveDisplayedProfile() {
     const profile = getDisplayedProfile();
     if (!profile) {
@@ -1206,9 +1217,9 @@ function renderStatus(profile) {
         </div>
         <div class="aspect-destinia-objective-list">
             ${(Array.isArray(current?.objectives) && current.objectives.length)
-                ? current.objectives.map((obj, idx) => {
+                ? current.objectives.map((obj) => {
                     const normalized = normalizeObjectiveItem(obj);
-                    return `<label class="aspect-destinia-objective-row"><input type="checkbox" class="aspect-destinia-objective-checkbox" data-objective-index="${idx}" ${normalized.completed ? 'checked' : ''} /> <span>${escapeHtml(normalized.text)} <code>${normalized.completed ? 'true' : 'false'}</code></span></label>`;
+                    return `<div class="aspect-destinia-objective-row"><span class="aspect-destinia-objective-icon" aria-hidden="true">${normalized.completed ? '☑' : '☐'}</span> <span>${escapeHtml(normalized.text)} <code>${normalized.completed ? 'true' : 'false'}</code></span></div>`;
                 }).join('')
                 : '<div class="aspect-destinia-empty">No objectives on this beat.</div>'}
         </div>
@@ -1483,9 +1494,6 @@ function bindUI() {
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold').on('input', updateSliderDisplays);
 
-    $(document).on('change', '#aspect_destinia_status .aspect-destinia-objective-checkbox', function () {
-        toggleObjectiveCompletion($(this).data('objective-index'), $(this).is(':checked'));
-    });
 }
 
 
