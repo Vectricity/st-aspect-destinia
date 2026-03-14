@@ -671,7 +671,14 @@ function renderDiagnosticForLatestAssistantMessage() {
     if (!el) return;
 
     el.querySelectorAll('.aspect-destinia-diagnostic-box').forEach(x => x.remove());
-    el.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
+
+    const messageBody =
+        el.querySelector('.mes_text')
+        || el.querySelector('.message_text')
+        || el.querySelector('.mes_block')
+        || el;
+
+    messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
 }
 
 function parseJsonObject(text) {
