@@ -16,9 +16,9 @@ const DEFAULT_TIMELINE_TEMPLATE = {
             title: 'Opening Situation',
             summary: 'Describe the current narrative stage and what the cast is generally dealing with.',
             objectives: [
-                'Establish the setting and immediate situation.',
-                'Surface the main character motivations that matter for this phase.',
-                'Allow the user to meaningfully interact with the current story situation.'
+                { text: 'Establish the setting and immediate situation.', completed: false },
+                { text: 'Surface the main character motivations that matter for this phase.', completed: false },
+                { text: 'Allow the user to meaningfully interact with the current story situation.', completed: false }
             ],
             completionHints: [
                 'The current situation has clearly played out.',
@@ -26,6 +26,7 @@ const DEFAULT_TIMELINE_TEMPLATE = {
                 'The scene feels narratively ready to transition.'
             ],
             steeringPrompt: 'Keep the narrative focused on the opening situation while remaining flexible to the user’s choices.',
+            transitionGuidance: 'Before moving into the escalation, explicitly show what changed in-scene that caused the transition and introduce any newly relevant elements.',
             pace: 'medium',
             delayable: true
         },
@@ -34,9 +35,9 @@ const DEFAULT_TIMELINE_TEMPLATE = {
             title: 'First Escalation',
             summary: 'Describe the next major development or escalation.',
             objectives: [
-                'Introduce the next complication or escalation naturally.',
-                'Preserve continuity from the prior beat.',
-                'Let the user influence how the transition feels.'
+                { text: 'Introduce the next complication or escalation naturally.', completed: false },
+                { text: 'Preserve continuity from the prior beat.', completed: false },
+                { text: 'Let the user influence how the transition feels.', completed: false }
             ],
             completionHints: [
                 'The escalation is now active in the story.',
@@ -44,6 +45,7 @@ const DEFAULT_TIMELINE_TEMPLATE = {
                 'The cast is no longer grounded in the previous beat.'
             ],
             steeringPrompt: 'Transition naturally into the escalation without making the shift feel abrupt or forced.',
+            transitionGuidance: 'Introduce the escalation setup and consequence chain before diving into direct conflict beats.',
             pace: 'medium',
             delayable: true
         }
@@ -103,6 +105,12 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Current beat pace: {{current_pace}}'
             ].join('\n'),
 
+        transitionTemplate:
+            [
+                'Transition requirements from current beat to next beat:',
+                '{{transition_requirements}}'
+            ].join('\n'),
+
         objectiveModeTemplate:
             [
                 'Use objective-based progression rules for the current beat.',
@@ -157,6 +165,7 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Current beat: {{current_title}}',
                 'Current beat summary: {{current_summary}}',
                 'Current beat objectives: {{current_objectives_inline}}',
+                'Current beat objective completion booleans: {{current_objective_completion_inline}}',
                 'Current beat completion hints: {{current_hints_inline}}',
                 'Next beat: {{next_title}}',
                 'Recent chat:',
@@ -339,7 +348,7 @@ function safeParseTimeline(text) {
     try {
         const parsed = typeof text === 'string' ? JSON.parse(text) : text;
         if (!parsed || !Array.isArray(parsed.plotPoints)) return null;
-        return parsed;
+        return normalizeTimeline(parsed);
     } catch {
         return null;
     }
@@ -364,6 +373,45 @@ function formatList(items) {
     return items.map(item => `- ${item}`).join('\n');
 }
 
+function normalizeObjectiveItem(item) {
+    if (typeof item === 'string') {
+        return { text: item, completed: false };
+    }
+    if (item && typeof item === 'object') {
+        return {
+            text: String(item.text || '').trim(),
+            completed: Boolean(item.completed)
+        };
+    }
+    return { text: '', completed: false };
+}
+
+function normalizeTimeline(timeline) {
+    if (!timeline || !Array.isArray(timeline.plotPoints)) return timeline;
+    timeline.plotPoints = timeline.plotPoints.map(point => {
+        const objectives = Array.isArray(point.objectives)
+            ? point.objectives.map(normalizeObjectiveItem).filter(o => o.text)
+            : [];
+        const transitionGuidance = String(point.transitionGuidance || '').trim();
+        return {
+            ...point,
+            objectives,
+            transitionGuidance: transitionGuidance || 'Show the causal bridge from this beat into the next beat before the next beat action fully begins.'
+        };
+    });
+    return timeline;
+}
+
+function formatObjectives(items) {
+    if (!Array.isArray(items) || items.length === 0) return '- none';
+    return items.map(item => {
+        const objective = normalizeObjectiveItem(item);
+        const marker = objective.completed ? '[x]' : '[ ]';
+        return `- ${marker} ${objective.text}`;
+    }).join('\n');
+}
+
+
 function replaceMacros(template, data) {
     return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
         return data[key] ?? '';
@@ -385,9 +433,13 @@ function buildTemplateData(profile) {
         current_summary: current.summary || '',
         current_steering: current.steeringPrompt || '',
         current_pace: current.pace || 'medium',
-        current_objectives: formatList(current.objectives),
+        current_objectives: formatObjectives(current.objectives),
         current_hints: formatList(current.completionHints),
-        current_objectives_inline: Array.isArray(current.objectives) ? current.objectives.join('; ') : '',
+        current_objectives_inline: Array.isArray(current.objectives) ? current.objectives.map(o => normalizeObjectiveItem(o).text).join('; ') : '',
+        current_objective_completion_inline: Array.isArray(current.objectives)
+            ? current.objectives.map(o => `${normalizeObjectiveItem(o).text}: ${normalizeObjectiveItem(o).completed ? 'true' : 'false'}`).join('; ')
+            : '',
+        transition_requirements: current.transitionGuidance || 'No transition guidance provided.',
         current_hints_inline: Array.isArray(current.completionHints) ? current.completionHints.join('; ') : '',
         next_title: next.title || 'None',
         next_summary: next.summary || 'No next beat.',
@@ -406,6 +458,7 @@ function buildInjection(profile) {
     chunks.push(replaceMacros(prompts.injectionIntro, data));
     chunks.push(replaceMacros(prompts.guidancePrinciples, data));
     chunks.push(replaceMacros(prompts.currentBeatTemplate, data));
+    chunks.push(replaceMacros(prompts.transitionTemplate, data));
 
     if (profile.advancementMode === 'objectives') {
         chunks.push(replaceMacros(prompts.objectiveModeTemplate, data));
@@ -650,16 +703,19 @@ function buildDiagnosticBoxHtml(profile) {
     }
 
     return `
-        <div class="aspect-destinia-diagnostic-box">
-            <div class="aspect-destinia-diagnostic-title">Aspect: Destinia Diagnostic (dev)</div>
-            <div><b>Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
-            <div><b>Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
-            <div><b>Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
-            <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
-            <details>
-                <summary><b>Information used for this response</b></summary>
-                <div class="aspect-destinia-diagnostic-body">${escapeHtml(infoUsed.join('\n\n') || 'No diagnostics captured yet.')}</div>
-            </details>
+        <div class="aspect-destinia-diagnostic-box" data-collapsed="false">
+            <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-clock"></i></button>
+            <div class="aspect-destinia-diagnostic-content">
+                <div class="aspect-destinia-diagnostic-title">Aspect: Destinia Diagnostic (dev)</div>
+                <div><b>Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
+                <div><b>Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
+                <div><b>Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
+                <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
+                <details>
+                    <summary><b>Information used for this response</b></summary>
+                    <div class="aspect-destinia-diagnostic-body">${escapeHtml(infoUsed.join('\n\n') || 'No diagnostics captured yet.')}</div>
+                </details>
+            </div>
         </div>
     `;
 }
@@ -679,6 +735,13 @@ function renderDiagnosticForLatestAssistantMessage() {
         || el;
 
     messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
+
+    const inserted = messageBody.querySelector('.aspect-destinia-diagnostic-box:last-of-type');
+    const toggle = inserted?.querySelector('.aspect-destinia-diagnostic-toggle');
+    toggle?.addEventListener('click', () => {
+        const collapsed = inserted.getAttribute('data-collapsed') === 'true';
+        inserted.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+    });
 }
 
 function parseJsonObject(text) {
@@ -885,7 +948,7 @@ function profileToForm(profile) {
     }
 
     $('#aspect_destinia_profile_select').val(profile.id);
-    $('#aspect_destinia_entry_name').val(profile.entryName || '');
+    $('#aspect_destinia_entry_name_display').text(profile.entryName || 'Untitled Entry');
     $('#aspect_destinia_enabled').prop('checked', !!profile.enabled);
     $('#aspect_destinia_mode').val(profile.advancementMode || 'objectives');
     $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
@@ -904,6 +967,7 @@ function profileToForm(profile) {
     $('#aspect_destinia_prompt_objectives').val(profile.prompts.objectiveModeTemplate || '');
     $('#aspect_destinia_prompt_hints').val(profile.prompts.hintModeTemplate || '');
     $('#aspect_destinia_prompt_next').val(profile.prompts.nextBeatTemplate || '');
+    $('#aspect_destinia_prompt_transition').val(profile.prompts.transitionTemplate || '');
     $('#aspect_destinia_prompt_linger').val(profile.prompts.lingerInstruction || '');
     $('#aspect_destinia_prompt_advance').val(profile.prompts.advanceInstruction || '');
     $('#aspect_destinia_prompt_pacing').val(profile.prompts.pacingInstruction || '');
@@ -913,7 +977,7 @@ function profileToForm(profile) {
 }
 
 function clearForm() {
-    $('#aspect_destinia_entry_name').val('');
+    $('#aspect_destinia_entry_name_display').text('');
     $('#aspect_destinia_enabled').prop('checked', true);
     $('#aspect_destinia_mode').val('objectives');
     $('#aspect_destinia_auto_advance').prop('checked', true);
@@ -933,7 +997,7 @@ function formToProfile(profile) {
         throw new Error('Timeline JSON must be valid and include plotPoints[].');
     }
 
-    profile.entryName = $('#aspect_destinia_entry_name').val().trim() || 'Untitled Entry';
+    profile.entryName = $('#aspect_destinia_entry_name_display').text().trim() || profile.entryName || 'Untitled Entry';
     profile.enabled = $('#aspect_destinia_enabled').is(':checked');
     profile.advancementMode = $('#aspect_destinia_mode').val();
     profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
@@ -958,6 +1022,7 @@ function formToProfile(profile) {
     profile.prompts.objectiveModeTemplate = $('#aspect_destinia_prompt_objectives').val();
     profile.prompts.hintModeTemplate = $('#aspect_destinia_prompt_hints').val();
     profile.prompts.nextBeatTemplate = $('#aspect_destinia_prompt_next').val();
+    profile.prompts.transitionTemplate = $('#aspect_destinia_prompt_transition').val();
     profile.prompts.lingerInstruction = $('#aspect_destinia_prompt_linger').val();
     profile.prompts.advanceInstruction = $('#aspect_destinia_prompt_advance').val();
     profile.prompts.pacingInstruction = $('#aspect_destinia_prompt_pacing').val();
@@ -967,6 +1032,82 @@ function formToProfile(profile) {
     if (profile.state.currentIndex >= totalBeats) {
         profile.state.currentIndex = Math.max(0, totalBeats - 1);
     }
+}
+
+
+function exportDisplayedProfileToFile() {
+    const profile = getDisplayedProfile();
+    if (!profile) {
+        toastr.warning(`${MODULE_NAME}: no selected entry to export.`);
+        return;
+    }
+
+    const payload = JSON.stringify(profile, null, 2);
+    const blob = new Blob([payload], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${(profile.entryName || 'destinia-entry').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+}
+
+function importProfileFromFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const parsed = JSON.parse(String(reader.result || '{}'));
+            const imported = mergeDeep(structuredClone(DEFAULT_PROFILE), parsed || {});
+            imported.id = makeId('destinia');
+            imported.entryName = `${imported.entryName || 'Imported Entry'} (Imported)`;
+            imported.timeline = normalizeTimeline(imported.timeline || safeParseTimeline(imported.timelineText) || structuredClone(DEFAULT_TIMELINE_TEMPLATE));
+            imported.timelineText = JSON.stringify(imported.timeline, null, 2);
+            getProfiles().push(imported);
+            persistProfile(imported);
+            setSelectedProfileId(imported.id);
+            refreshUI();
+            toastr.success(`${MODULE_NAME}: imported entry from file.`);
+        } catch (err) {
+            toastr.error(`${MODULE_NAME}: failed to import entry (${err.message}).`);
+        } finally {
+            $('#aspect_destinia_import_file').val('');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function promptRenameEntry() {
+    const profile = getDisplayedProfile();
+    if (!profile) {
+        toastr.warning(`${MODULE_NAME}: select an entry to rename.`);
+        return;
+    }
+
+    const nextName = prompt('Rename entry', profile.entryName || '');
+    if (nextName === null) return;
+    profile.entryName = nextName.trim() || profile.entryName;
+    persistProfile(profile);
+    refreshUI();
+}
+
+function toggleObjectiveCompletion(objectiveIndex, checked) {
+    const profile = getDisplayedProfile();
+    if (!profile) return;
+    const current = getCurrentBeat(profile);
+    if (!current || !Array.isArray(current.objectives)) return;
+    const idx = Number(objectiveIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= current.objectives.length) return;
+    const normalized = normalizeObjectiveItem(current.objectives[idx]);
+    normalized.completed = Boolean(checked);
+    current.objectives[idx] = normalized;
+    profile.timelineText = JSON.stringify(profile.timeline, null, 2);
+    persistProfile(profile);
+    updateExtensionPrompt();
+    refreshUI();
 }
 
 function saveDisplayedProfile() {
@@ -1054,6 +1195,14 @@ function renderStatus(profile) {
         <div class="aspect-destinia-status-reason">
             ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}
         </div>
+        <div class="aspect-destinia-objective-list">
+            ${(Array.isArray(current?.objectives) && current.objectives.length)
+                ? current.objectives.map((obj, idx) => {
+                    const normalized = normalizeObjectiveItem(obj);
+                    return `<label class="aspect-destinia-objective-row"><input type="checkbox" class="aspect-destinia-objective-checkbox" data-objective-index="${idx}" ${normalized.completed ? 'checked' : ''} /> <span>${escapeHtml(normalized.text)} <code>${normalized.completed ? 'true' : 'false'}</code></span></label>`;
+                }).join('')
+                : '<div class="aspect-destinia-empty">No objectives on this beat.</div>'}
+        </div>
     `);
 }
 
@@ -1138,20 +1287,26 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-toolbar">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <label class="aspect-destinia-label">Entry</label>
-                                <select id="aspect_destinia_profile_select"></select>
+                                <div class="aspect-destinia-entry-picker-row">
+                                    <div class="aspect-destinia-select-wrap">
+                                        <select id="aspect_destinia_profile_select"></select>
+                                        <span class="aspect-destinia-select-arrow">▾</span>
+                                    </div>
+                                    <button id="aspect_destinia_rename" class="menu_button menu_button_icon" title="Rename Entry"><i class="fa-solid fa-pen"></i></button>
+                                </div>
+                                <div id="aspect_destinia_entry_name_display" class="aspect-destinia-entry-name-display"></div>
                             </div>
                             <button id="aspect_destinia_create" class="menu_button">Create Entry for Current Chat</button>
                             <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Entry</button>
                             <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Entry</button>
+                            <button id="aspect_destinia_export" class="menu_button">Export Entry</button>
+                            <button id="aspect_destinia_import" class="menu_button">Import Entry</button>
+                            <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
 
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid two">
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Entry Name</label>
-                                <input id="aspect_destinia_entry_name" type="text" />
-                            </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Attached Chat</label>
                                 <div class="aspect-destinia-inline">
@@ -1238,6 +1393,11 @@ function buildSettingsHtml() {
                             </div>
                         </div>
 
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Transition Template</label>
+                            <textarea id="aspect_destinia_prompt_transition"></textarea>
+                        </div>
+
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Mode Template</label>
@@ -1289,6 +1449,10 @@ function bindUI() {
     $('#aspect_destinia_delete').on('click', deleteSelectedProfile);
     $('#aspect_destinia_attach_current').on('click', attachSelectedProfileToCurrentChat);
     $('#aspect_destinia_save').on('click', saveDisplayedProfile);
+    $('#aspect_destinia_export').on('click', exportDisplayedProfileToFile);
+    $('#aspect_destinia_import').on('click', () => $('#aspect_destinia_import_file').trigger('click'));
+    $('#aspect_destinia_import_file').on('change', importProfileFromFile);
+    $('#aspect_destinia_rename').on('click', promptRenameEntry);
 
     $('#aspect_destinia_validate').on('click', () => {
         const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
@@ -1309,7 +1473,12 @@ function bindUI() {
     $('#aspect_destinia_reset_beat').on('click', resetCurrentBeatToFirst);
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold').on('input', updateSliderDisplays);
+
+    $(document).on('change', '#aspect_destinia_status .aspect-destinia-objective-checkbox', function () {
+        toggleObjectiveCompletion($(this).data('objective-index'), $(this).is(':checked'));
+    });
 }
+
 
 function renderRoot() {
     if (document.getElementById(ROOT_ID)) return;
