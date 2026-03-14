@@ -219,15 +219,16 @@
     gap: 8px;
 }
 
-#chat .aspect-destinia-diagnostic-box {
-    position: relative;
-    padding-top: 38px;
+#chat .aspect-destinia-diagnostic-container {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
 }
 
 #chat .aspect-destinia-diagnostic-toggle {
-    position: absolute;
-    top: 8px;
-    right: 8px;
+    position: relative;
     border: 1px solid var(--SmartThemeBorderColor);
     background: rgba(255,255,255,0.06);
     border-radius: 8px;
@@ -235,11 +236,28 @@
     cursor: pointer;
 }
 
-#chat .aspect-destinia-diagnostic-box[data-collapsed="true"] .aspect-destinia-diagnostic-content {
+#chat .aspect-destinia-diagnostic-container[data-collapsed="true"] .aspect-destinia-diagnostic-content {
     display: none;
 }
 
-#chat .aspect-destinia-diagnostic-box[data-collapsed="true"] {
-    padding: 10px;
-    width: fit-content;
+#chat .aspect-destinia-diagnostic-container[data-collapsed="true"] .aspect-destinia-diagnostic-box {
+    display: none;
+}
+
+
+#chat .aspect-destinia-diagnostic-objectives {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#chat .aspect-destinia-diagnostic-objective-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+#chat .aspect-destinia-diagnostic-objective-icon {
+    min-width: 1em;
 }
