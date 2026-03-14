@@ -140,3 +140,29 @@
 #aspect_destinia_root .inline-drawer-header b {
     letter-spacing: 0.02em;
 }
+
+#chat .aspect-destinia-diagnostic-box {
+    margin-top: 10px;
+    border-radius: 12px;
+    border: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, rgba(240, 184, 74, 0.12));
+    padding: 10px 12px;
+    font-size: 0.92rem;
+    line-height: 1.42;
+}
+
+#chat .aspect-destinia-diagnostic-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+#chat .aspect-destinia-diagnostic-box details {
+    margin-top: 8px;
+}
+
+#chat .aspect-destinia-diagnostic-body {
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    opacity: 0.92;
+}

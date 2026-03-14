@@ -72,7 +72,8 @@ const DEFAULT_PROFILE = Object.freeze({
         lastIntentConfidence: 0,
         lastIntentReason: 'No intent evaluation has run yet.',
         lastEvalHash: '',
-        lastTransitionAt: 0
+        lastTransitionAt: 0,
+        lastDiagnostic: null
     },
     prompts: {
         injectionIntro:
@@ -496,16 +497,30 @@ function stringifyRecentChat(limit = 8) {
 }
 
 async function evaluateIntentIfNeeded(trigger = 'unknown') {
+    return evaluateIntentIfNeededWithOptions(trigger, {});
+}
+
+async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = {}) {
+    const { force = false, notify = false } = options;
     const ctx = getCtx();
     const profile = getActiveProfile();
-    if (!profile?.enabled) return;
-    if (!profile.autoAdvance && !profile.respectUserIntent) return;
+    if (!profile?.enabled) {
+        if (notify) toastr.warning(`${MODULE_NAME}: no enabled active entry for this chat.`);
+        return;
+    }
+    if (!force && !profile.autoAdvance && !profile.respectUserIntent) {
+        if (notify) toastr.warning(`${MODULE_NAME}: enable auto-advance or respect intent to run intent checks.`);
+        return;
+    }
 
     const currentBeat = getCurrentBeat(profile);
-    if (!currentBeat) return;
+    if (!currentBeat) {
+        if (notify) toastr.warning(`${MODULE_NAME}: no current beat is available.`);
+        return;
+    }
 
     const hash = chatHash(profile.intentWindow || 8);
-    if (hash === profile.state.lastEvalHash) return;
+    if (!force && hash === profile.state.lastEvalHash) return;
 
     profile.state.lastEvalHash = hash;
 
@@ -541,6 +556,23 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
         profile.state.lastIntentDecision = finalDecision;
         profile.state.lastIntentConfidence = confidence;
         profile.state.lastIntentReason = String(parsed.reason || 'No reason provided.');
+        profile.state.lastDiagnostic = {
+            updatedAt: Date.now(),
+            trigger,
+            recentChat: data.recent_chat,
+            evaluatorDecision: decision,
+            finalDecision,
+            confidence,
+            beatComplete,
+            userWantsToLinger,
+            advancementMode: profile.advancementMode,
+            currentBeatTitle: currentBeat?.title || '',
+            currentBeatSummary: currentBeat?.summary || '',
+            currentBeatObjectives: Array.isArray(currentBeat?.objectives) ? currentBeat.objectives : [],
+            currentBeatHints: Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [],
+            nextBeatTitle: getNextBeat(profile)?.title || 'None',
+            nextBeatSummary: getNextBeat(profile)?.summary || 'No next beat.'
+        };
 
         const canAdvance =
             profile.autoAdvance &&
@@ -559,6 +591,7 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
         persistProfile(profile);
         updateExtensionPrompt();
         refreshUI();
+        if (notify) toastr.success(`${MODULE_NAME}: intent check complete (${finalDecision}, ${confidence.toFixed(2)}).`);
     } catch (err) {
         console.warn(`[${MODULE_NAME}] Intent evaluation failed`, err);
         profile.state.lastIntentDecision = 'stay';
@@ -566,7 +599,79 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
         persistProfile(profile);
         updateExtensionPrompt();
         refreshUI();
+        if (notify) toastr.error(`${MODULE_NAME}: intent check failed (${err.message}).`);
     }
+}
+
+function findLatestAssistantMessageElement() {
+    const ctx = getCtx();
+    const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
+    let assistantIndex = -1;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (!chat[i]?.is_user) {
+            assistantIndex = i;
+            break;
+        }
+    }
+
+    if (assistantIndex !== -1) {
+        const byAttr = document.querySelector(`#chat .mes[mesid="${assistantIndex}"]`)
+            || document.querySelector(`#chat .mes[data-mesid="${assistantIndex}"]`);
+        if (byAttr) return byAttr;
+    }
+
+    const all = Array.from(document.querySelectorAll('#chat .mes'));
+    for (let i = all.length - 1; i >= 0; i--) {
+        const el = all[i];
+        const isUser =
+            el.classList.contains('user_mes')
+            || el.classList.contains('is_user')
+            || el.getAttribute('is_user') === 'true'
+            || el.dataset.isUser === 'true';
+        if (!isUser) return el;
+    }
+
+    return null;
+}
+
+function buildDiagnosticBoxHtml(profile) {
+    const current = getCurrentBeat(profile);
+    const next = getNextBeat(profile);
+    const diag = profile?.state?.lastDiagnostic || {};
+    const infoUsed = [];
+    if (Array.isArray(diag.currentBeatObjectives) && diag.currentBeatObjectives.length) {
+        infoUsed.push(`Objectives: ${diag.currentBeatObjectives.join(' | ')}`);
+    }
+    if (Array.isArray(diag.currentBeatHints) && diag.currentBeatHints.length) {
+        infoUsed.push(`Completion hints: ${diag.currentBeatHints.join(' | ')}`);
+    }
+    if (diag.recentChat) {
+        infoUsed.push(`Recent chat window (${profile.intentWindow || 8} lines): ${diag.recentChat}`);
+    }
+
+    return `
+        <div class="aspect-destinia-diagnostic-box">
+            <div class="aspect-destinia-diagnostic-title">Aspect: Destinia Diagnostic (dev)</div>
+            <div><b>Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
+            <div><b>Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
+            <div><b>Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
+            <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
+            <details>
+                <summary><b>Information used for this response</b></summary>
+                <div class="aspect-destinia-diagnostic-body">${escapeHtml(infoUsed.join('\n\n') || 'No diagnostics captured yet.')}</div>
+            </details>
+        </div>
+    `;
+}
+
+function renderDiagnosticForLatestAssistantMessage() {
+    const profile = getActiveProfile();
+    if (!profile?.enabled) return;
+    const el = findLatestAssistantMessageElement();
+    if (!el) return;
+
+    el.querySelectorAll('.aspect-destinia-diagnostic-box').forEach(x => x.remove());
+    el.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
 }
 
 function parseJsonObject(text) {
@@ -1188,7 +1293,7 @@ function bindUI() {
     });
 
     $('#aspect_destinia_eval').on('click', async () => {
-        await evaluateIntentIfNeeded('manual');
+        await evaluateIntentIfNeededWithOptions('manual', { force: true, notify: true });
         refreshUI();
     });
 
@@ -1220,6 +1325,7 @@ function bindEvents() {
     });
     ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
         await evaluateIntentIfNeeded('assistant message');
+        renderDiagnosticForLatestAssistantMessage();
     });
     ctx.eventSource.on(ctx.event_types.APP_READY, () => {
         renderRoot();
