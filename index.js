@@ -720,10 +720,10 @@ function buildDiagnosticBoxHtml(profile) {
                 return `<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-icon" aria-hidden="true">${icon}</span> <span>${escapeHtml(objective.text || 'Untitled objective')}</span></div>`;
             })
             .join('');
-        infoUsed.push(`<div><b>Objectives:</b></div><div class="aspect-destinia-diagnostic-objectives">${objectivesHtml}</div>`);
+        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Objectives:</b></div><div class="aspect-destinia-diagnostic-objectives">${objectivesHtml}</div>`);
     }
     if (Array.isArray(diag.currentBeatHints) && diag.currentBeatHints.length) {
-        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-highlight">Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
+        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
     }
 
     return `
@@ -734,10 +734,10 @@ function buildDiagnosticBoxHtml(profile) {
             </div>
             <div class="aspect-destinia-diagnostic-box">
             <div class="aspect-destinia-diagnostic-content">
-                <div><b class="aspect-destinia-diagnostic-highlight">Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
-                <div><b>Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
-                <div><b>Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
-                <div><b>Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
                 <details>
                     <summary><b>Information used for this response</b></summary>
                     <div class="aspect-destinia-diagnostic-body">${infoUsed.join('') || 'No diagnostics captured yet.'}</div>
@@ -818,33 +818,50 @@ async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatTex
 }
 
 function evaluateIntentLocally(profile, recentChatText) {
-    const text = String(recentChatText || '').toLowerCase();
+    const text = String(recentChatText || '');
     const userLines = text
         .split('\n')
-        .filter(line => line.toLowerCase().includes('user:'))
-        .slice(-3)
-        .join(' ');
+        .map(line => line.trim())
+        .filter(line => /^\d+\.\s*user\s*:/i.test(line))
+        .slice(-2)
+        .map(line => line.replace(/^\d+\.\s*user\s*:/i, '').trim())
+        .join(' ')
+        .toLowerCase();
 
-    const advanceSignals = [
-        'next', 'move on', 'continue', 'let\'s go', 'lets go', 'head to', 'after this',
-        'done here', 'finished', 'resolve this', 'leave', 'proceed', 'advance'
+    const strongAdvanceSignals = [
+        'move on', 'head to', 'after this', 'done here', 'finished here',
+        'leave now', 'let\'s go', 'lets go', 'proceed', 'advance'
     ];
+    const weakAdvanceSignals = ['next', 'continue'];
     const lingerSignals = [
         'wait', 'hold on', 'stay', 'linger', 'talk more', 'investigate', 'look around',
-        'reflect', 'train', 'not yet', 'before we go', 'keep exploring'
+        'reflect', 'train', 'not yet', 'before we go', 'keep exploring', 'keep talking'
     ];
 
-    const advanceHits = advanceSignals.filter(s => userLines.includes(s)).length;
-    const lingerHits = lingerSignals.filter(s => userLines.includes(s)).length;
+    const countSignalHits = (signals = []) => signals.filter((signal) => {
+        const escaped = signal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = signal.includes(' ')
+            ? new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i')
+            : new RegExp(`\\b${escaped}\\b`, 'i');
+        return pattern.test(userLines);
+    }).length;
+
+    const strongAdvanceHits = countSignalHits(strongAdvanceSignals);
+    const weakAdvanceHits = countSignalHits(weakAdvanceSignals);
+    const lingerHits = countSignalHits(lingerSignals);
 
     let decision = 'stay';
     let confidence = 0.55;
     let reason = 'Local fallback evaluator found no strong progression signal.';
 
-    if (advanceHits > lingerHits) {
+    if (strongAdvanceHits > 0 && lingerHits === 0) {
         decision = 'advance';
-        confidence = Math.min(0.9, 0.62 + (advanceHits * 0.08));
+        confidence = Math.min(0.9, 0.7 + (strongAdvanceHits * 0.07));
         reason = 'Local fallback evaluator detected forward-progress wording from the user.';
+    } else if (weakAdvanceHits >= 2 && lingerHits === 0) {
+        decision = 'advance';
+        confidence = 0.64;
+        reason = 'Local fallback evaluator detected repeated weak progression wording from the user.';
     } else if (lingerHits > 0) {
         decision = 'stay';
         confidence = Math.min(0.9, 0.65 + (lingerHits * 0.07));
@@ -858,18 +875,18 @@ function evaluateIntentLocally(profile, recentChatText) {
         if (objective.completed) return true;
         const objectiveNeedle = objective.text.toLowerCase().slice(0, 30);
         if (objectiveNeedle && userLines.includes(objectiveNeedle)) return true;
-        return decision === 'advance';
+        return false;
     });
     const beatComplete = hints.length > 0
-        ? hints.some(h => userLines.includes(String(h).toLowerCase().slice(0, 24))) || decision === 'advance'
-        : decision === 'advance';
+        ? hints.some(h => userLines.includes(String(h).toLowerCase().slice(0, 24)))
+        : objectiveCompletion.length > 0 ? objectiveCompletion.every(Boolean) : false;
 
     return {
         decision,
         confidence,
         reason,
         beat_complete: beatComplete,
-        user_wants_to_linger: lingerHits > advanceHits,
+        user_wants_to_linger: lingerHits > 0,
         objective_completion: objectiveCompletion
     };
 }
