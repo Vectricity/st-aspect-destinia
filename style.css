@@ -255,6 +255,10 @@
     color: #ffd84d;
 }
 
+#chat .aspect-destinia-diagnostic-sand {
+    color: #c2b280;
+}
+
 #chat .aspect-destinia-diagnostic-container[data-collapsed="true"] .aspect-destinia-diagnostic-content {
     display: none;
 }
