@@ -157,10 +157,11 @@ const DEFAULT_PROFILE = Object.freeze({
                 '  "decision": "stay" | "advance",',
                 '  "confidence": 0.0,',
                 '  "reason": "short explanation",',
-                '  "beat_complete": true,',
-                '  "user_wants_to_linger": false,',
+                '  "beat_complete": [true, false],',
+                '  "user_wants_to_linger": [true, false],',
                 '  "objective_completion": [true, false]',
                 '}',
+                'Use JSON booleans only (true/false), never quoted strings.',
                 'Only set objective_completion items to true when the objective is complete based on the recent chat.',
                 '',
                 'Story title: {{story_title}}',
@@ -599,11 +600,14 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
 
         const decision = parsed.decision === 'advance' ? 'advance' : 'stay';
         const confidence = clamp01(Number(parsed.confidence) || 0);
-        const beatComplete = Boolean(parsed.beat_complete);
-        const userWantsToLinger = Boolean(parsed.user_wants_to_linger);
-        const objectiveCompletion = Array.isArray(parsed.objective_completion)
-            ? parsed.objective_completion.map(Boolean)
-            : null;
+        const beatComplete = parseBooleanLike(parsed.beat_complete, false);
+        const userWantsToLinger = parseBooleanLike(parsed.user_wants_to_linger, false);
+        let objectiveCompletion = null;
+        if (Array.isArray(parsed.objective_completion)) {
+            objectiveCompletion = parsed.objective_completion.map(item => parseBooleanLike(item, false));
+        } else if (parsed.objective_completion && typeof parsed.objective_completion === 'object') {
+            objectiveCompletion = Object.values(parsed.objective_completion).map(item => parseBooleanLike(item, false));
+        }
 
         let finalDecision = decision;
         if (userWantsToLinger) finalDecision = 'stay';
@@ -788,6 +792,17 @@ function parseJsonObject(text) {
     }
 }
 
+function parseBooleanLike(value, fallback = false) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', 'yes', 'y', '1'].includes(normalized)) return true;
+        if (['false', 'no', 'n', '0'].includes(normalized)) return false;
+    }
+    return fallback;
+}
+
 async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatText) {
     if (remoteIntentEvalDisabled) {
         return evaluateIntentLocally(profile, recentChatText);
@@ -825,8 +840,8 @@ function evaluateIntentLocally(profile, recentChatText) {
         .filter(line => /^\d+\.\s*user\s*:/i.test(line))
         .slice(-2)
         .map(line => line.replace(/^\d+\.\s*user\s*:/i, '').trim())
-        .join(' ')
-        .toLowerCase();
+        .join(' ');
+    const userLinesLower = userLines.toLowerCase();
 
     const strongAdvanceSignals = [
         'move on', 'head to', 'after this', 'done here', 'finished here',
@@ -843,7 +858,7 @@ function evaluateIntentLocally(profile, recentChatText) {
         const pattern = signal.includes(' ')
             ? new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i')
             : new RegExp(`\\b${escaped}\\b`, 'i');
-        return pattern.test(userLines);
+        return pattern.test(userLinesLower);
     }).length;
 
     const strongAdvanceHits = countSignalHits(strongAdvanceSignals);
@@ -871,14 +886,38 @@ function evaluateIntentLocally(profile, recentChatText) {
     const currentBeat = getCurrentBeat(profile);
     const hints = Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [];
     const objectives = Array.isArray(currentBeat?.objectives) ? currentBeat.objectives.map(normalizeObjectiveItem) : [];
+    const completionVerbSignals = [
+        'done', 'completed', 'finished', 'resolved', 'handled', 'achieved', 'accomplished', 'wrapped up', 'took care of'
+    ];
+    const userWordSet = new Set((userLinesLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
+
+    const hasObjectiveCompletionSignal = (objectiveText) => {
+        const objectiveWords = String(objectiveText || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9'\s]/g, ' ')
+            .split(/\s+/)
+            .filter(word => word.length > 3);
+
+        if (!objectiveWords.length) return false;
+
+        const matchedWords = objectiveWords.filter(word => userWordSet.has(word));
+        const overlapRatio = matchedWords.length / objectiveWords.length;
+        const hasCompletionVerb = completionVerbSignals.some(signal => userLinesLower.includes(signal));
+
+        if (overlapRatio >= 0.6 || (matchedWords.length >= 3 && overlapRatio >= 0.4)) {
+            return true;
+        }
+
+        return hasCompletionVerb && matchedWords.length >= 2;
+    };
+
     const objectiveCompletion = objectives.map(objective => {
         if (objective.completed) return true;
-        const objectiveNeedle = objective.text.toLowerCase().slice(0, 30);
-        if (objectiveNeedle && userLines.includes(objectiveNeedle)) return true;
+        if (hasObjectiveCompletionSignal(objective.text)) return true;
         return false;
     });
     const beatComplete = hints.length > 0
-        ? hints.some(h => userLines.includes(String(h).toLowerCase().slice(0, 24)))
+        ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24)))
         : objectiveCompletion.length > 0 ? objectiveCompletion.every(Boolean) : false;
 
     return {
