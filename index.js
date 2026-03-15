@@ -156,6 +156,7 @@ const DEFAULT_PROFILE = Object.freeze({
             [
                 'You are evaluating roleplay progression for a story timeline controller.',
                 'Read the recent chat and determine whether the USER is signaling that the story should stay on the current beat or may transition toward the next beat.',
+                'Only mark objectives complete when the USER meaningfully demonstrates progress. Do not mark completion based only on assistant/NPC narration or dialogue.',
                 'Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-beat task, or is engaged in an important unresolved conversation. Ordinary banter or casual dialogue alone is not lingering intent.',
                 '{{objective_completion_guidance}}',
                 'Return ONLY valid JSON with these keys:',
@@ -177,6 +178,8 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Current beat objective completion booleans: {{current_objective_completion_inline}}',
                 'Current beat completion hints: {{current_hints_inline}}',
                 'Next beat: {{next_title}}',
+                'Recent USER-only chat (primary evidence for objective completion):',
+                '{{recent_user_chat}}',
                 'Recent chat:',
                 '{{recent_chat}}'
             ].join('\n')
@@ -425,13 +428,14 @@ function classifyObjectiveIssues(objectiveText) {
     const words = text.split(/\s+/).filter(Boolean);
     const vagueStarts = /^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b/i;
     const vaguePhrases = /\b(something|somehow|etc\.?|and more|as needed|overall|in general|everything|anything|stuff)\b/i;
-    const broadPhrases = /\b(entire|all(?:\s+of)?|every(?:thing)?|the whole|worldbuilding|storyline|main plot)\b/i;
+    const broadPhrases = /\b(entire|all(?:\s+of)?|every(?:thing)?|the whole|worldbuilding|storyline|main plot|character development|relationships|narrative arc)\b/i;
     const splitSignals = /\b(and|then|while|meanwhile|plus|also|before|after)\b/i;
+    const measurableActionSignal = /\b(show|reveal|establish|decide|confirm|identify|choose|confront|admit|discover|resolve|agree|refuse|learn|find|state|demonstrate)\b/i;
 
-    if (words.length > 24 || /[,;:].+[,;:]/.test(text) || splitSignals.test(text) && words.length > 14) {
+    if (words.length > 24 || /[,;:].+[,;:]/.test(text) || (splitSignals.test(text) && words.length > 10)) {
         issues.push({ type: 'complicated', message: 'Objective combines too many actions and should be split.' });
     }
-    if (words.length < 4 || vagueStarts.test(text) || vaguePhrases.test(text)) {
+    if (words.length < 4 || vagueStarts.test(text) || vaguePhrases.test(text) || !measurableActionSignal.test(text)) {
         issues.push({ type: 'vague', message: 'Objective is too vague and should be more specific.' });
     }
     if (broadPhrases.test(text)) {
@@ -448,7 +452,7 @@ function buildObjectiveFixes(objectiveText) {
     }
 
     const chunks = source
-        .split(/\s*(?:;|\.|\band then\b|\bthen\b|\bwhile\b|\bplus\b|\balso\b)\s+/i)
+        .split(/\s*(?:;|\.|\band then\b|\bthen\b|\bwhile\b|\bplus\b|\balso\b|\band\b)\s+/i)
         .map(part => part.trim())
         .filter(Boolean);
 
@@ -690,6 +694,15 @@ function stringifyRecentChat(limit = 8) {
         .join('\n');
 }
 
+function stringifyRecentUserChat(limit = 8) {
+    const ctx = getCtx();
+    return (ctx.chat || [])
+        .filter(m => m?.is_user)
+        .slice(-limit)
+        .map((m, idx) => `${idx + 1}. User: ${String(m.mes || '').trim()}`)
+        .join('\n');
+}
+
 async function evaluateIntentIfNeeded(trigger = 'unknown') {
     return evaluateIntentIfNeededWithOptions(trigger, {});
 }
@@ -720,6 +733,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
 
     const data = buildTemplateData(profile);
     data.recent_chat = stringifyRecentChat(profile.intentWindow || 8);
+    data.recent_user_chat = stringifyRecentUserChat(profile.intentWindow || 8);
 
     const prompt = replaceMacros(profile.prompts.evaluatorPrompt || '', data);
 
@@ -1040,20 +1054,20 @@ function evaluateIntentLocally(profile, recentChatText) {
 
     let decision = 'stay';
     let confidence = 0.55;
-    let reason = 'Local fallback evaluator found no strong progression signal.';
+    let reason = 'Evaluator found no strong progression signal.';
 
     if (strongAdvanceHits > 0 && lingerHits === 0) {
         decision = 'advance';
         confidence = Math.min(0.9, 0.7 + (strongAdvanceHits * 0.07));
-        reason = 'Local fallback evaluator detected forward-progress wording from the user.';
+        reason = 'Evaluator detected forward-progress wording from the user.';
     } else if (weakAdvanceHits >= 2 && lingerHits === 0) {
         decision = 'advance';
         confidence = 0.64;
-        reason = 'Local fallback evaluator detected repeated weak progression wording from the user.';
+        reason = 'Evaluator detected repeated weak progression wording from the user.';
     } else if (lingerHits > 0) {
         decision = 'stay';
         confidence = Math.min(0.9, 0.65 + (lingerHits * 0.07));
-        reason = 'Local fallback evaluator detected linger/deepen wording from the user.';
+        reason = 'Evaluator detected linger/deepen wording from the user.';
     }
 
     const currentBeat = getCurrentBeat(profile);
@@ -1066,7 +1080,7 @@ function evaluateIntentLocally(profile, recentChatText) {
         'we did', 'we have', 'we got', 'we learned', 'we found', 'we established', 'we covered', 'we confirmed',
         'i did', 'i have', 'i got', 'i learned', 'i found', 'i established', 'i covered', 'i confirmed'
     ];
-    const interactionWordSet = new Set((interactionLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
+    const userWordSet = new Set((userLinesLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
 
     const hasObjectiveCompletionSignal = (objectiveText) => {
         const objectiveWords = String(objectiveText || '')
@@ -1077,33 +1091,16 @@ function evaluateIntentLocally(profile, recentChatText) {
 
         if (!objectiveWords.length) return false;
 
-        const interactionWords = Array.from(interactionWordSet);
+        const userWords = Array.from(userWordSet);
         const stems = objectiveWords.map(word => word.replace(/(ing|ed|es|s)$/i, ''));
-        const matchedWords = objectiveWords.filter(word => interactionWordSet.has(word));
-        const matchedStems = stems.filter(stem => stem && interactionWords.some(word => word.startsWith(stem) || stem.startsWith(word)));
+        const matchedWords = objectiveWords.filter(word => userWordSet.has(word));
+        const matchedStems = stems.filter(stem => stem && userWords.some(word => word.startsWith(stem) || stem.startsWith(word)));
         const overlapRatio = matchedWords.length / objectiveWords.length;
         const stemOverlapRatio = matchedStems.length / objectiveWords.length;
-        const hasCompletionVerb = completionVerbSignals.some(signal => interactionLower.includes(signal));
-        const hasProgressSignal = progressSignals.some(signal => interactionLower.includes(signal));
+        const hasCompletionVerb = completionVerbSignals.some(signal => userLinesLower.includes(signal));
+        const hasProgressSignal = progressSignals.some(signal => userLinesLower.includes(signal));
 
         if (overlapRatio >= 0.28 || stemOverlapRatio >= 0.4 || (matchedWords.length >= 2 && overlapRatio >= 0.2)) {
-            return true;
-        }
-
-        const userInquirySignal = /\?|\b(ask|asked|question|questions|tell me|who are|what are|why are|how do|about yourself)\b/i.test(userLinesLower);
-        const userInvestigationSignal = /\b(investigate|inspect|examine|search|look around|probe|question|interrogate|press|follow up|dig into)\b/i.test(userLinesLower);
-        const assistantDisclosureSignal = /\b(i am|i'm|my |me |i was|i feel|i want|i think|i believe|i remember|i used to)\b/i.test(assistantLinesLower);
-        const assistantRevealSignal = /\b(reveal|revealed|discover|discovered|found|learned|turns out|it appears|clue|evidence|truth)\b/i.test(assistantLinesLower);
-
-        const objectiveLower = String(objectiveText || '').toLowerCase();
-        const isCharacterInsightObjective = /\b(personality|motivation|motive|belief|fear|desire|backstory|past|trait|core|character)\b/.test(objectiveLower);
-        const isInvestigationObjective = /\b(uncover|discover|investigate|find|learn|identify|understand|clue|evidence|truth|mystery|cause)\b/.test(objectiveLower);
-
-        if (isCharacterInsightObjective && userInquirySignal && assistantDisclosureSignal) {
-            return true;
-        }
-
-        if (isInvestigationObjective && userInvestigationSignal && assistantRevealSignal) {
             return true;
         }
 
@@ -1492,7 +1489,8 @@ function addFieldResetButtons() {
         btn.className = 'menu_button aspect-destinia-field-reset';
         btn.type = 'button';
         btn.dataset.for = fieldId;
-        btn.textContent = 'Reset field to default';
+        const isSlider = fieldEl.tagName === 'INPUT' && String(fieldEl.getAttribute('type') || '').toLowerCase() === 'range';
+        btn.textContent = isSlider ? 'Reset Slider' : 'Reset';
         btn.addEventListener('click', () => resetFieldToDefault(fieldId));
 
         fieldEl.insertAdjacentElement('afterend', btn);
@@ -1583,25 +1581,15 @@ function stepBeat(delta) {
 function renderStatus(profile) {
     const current = getCurrentBeat(profile);
     const next = getNextBeat(profile);
-    const linked = getLinkedProfileIdForCurrentChat();
-    const isActiveForChat = linked && profile?.id === linked;
 
     $('#aspect_destinia_status').html(`
         <div class="aspect-destinia-status-grid">
             <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Current Chat</div>
-                <div class="aspect-destinia-stat-value">${escapeHtml(getChatLabel())}</div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Active Entry for Chat</div>
-                <div class="aspect-destinia-stat-value">${isActiveForChat ? 'Yes' : 'No'}</div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Current Beat</div>
+                <div class="aspect-destinia-stat-label">Current Plot Point</div>
                 <div class="aspect-destinia-stat-value">${escapeHtml(current?.title || 'None')}</div>
             </div>
             <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Next Beat</div>
+                <div class="aspect-destinia-stat-label">Next Plot Point</div>
                 <div class="aspect-destinia-stat-value">${escapeHtml(next?.title || 'None')}</div>
             </div>
             <div class="aspect-destinia-stat">
@@ -1717,12 +1705,12 @@ function buildSettingsHtml() {
                                 </div>
                                 <input id="aspect_destinia_entry_name" type="text" placeholder="Entry name" />
                             </div>
-                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Entry</button>
-                            <button id="aspect_destinia_create" class="menu_button">Create Entry for Current Chat</button>
-                            <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Entry</button>
-                            <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Entry</button>
-                            <button id="aspect_destinia_export" class="menu_button">Export Entry</button>
-                            <button id="aspect_destinia_import" class="menu_button">Import Entry</button>
+                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save</button>
+                            <button id="aspect_destinia_create" class="menu_button">Create for Current Chat</button>
+                            <button id="aspect_destinia_duplicate" class="menu_button">Duplicate</button>
+                            <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete</button>
+                            <button id="aspect_destinia_export" class="menu_button">Export</button>
+                            <button id="aspect_destinia_import" class="menu_button">Import</button>
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -1739,19 +1727,19 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-grid three">
-                            <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Enabled</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-advance when ready</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow next beat</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect user lingering intent</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-Advance Plot After Objective Threshold Met</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Advancement Mode</label>
+                                <label class="aspect-destinia-label">Story Progression</label>
                                 <select id="aspect_destinia_mode">
                                     <option value="objectives">Objective-based rules</option>
                                     <option value="hints">Simple completion hints</option>
                                 </select>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Intent Window</label>
+                                <label class="aspect-destinia-label">Recent Messages Window (Evaluator Context)</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
                         </div>
@@ -1777,10 +1765,9 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-actions">
                             <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
-                            <button id="aspect_destinia_eval" class="menu_button">Run Intent Check Now</button>
-                            <button id="aspect_destinia_prev" class="menu_button">Previous Beat</button>
-                            <button id="aspect_destinia_next" class="menu_button">Next Beat</button>
-                            <button id="aspect_destinia_reset_beat" class="menu_button">Reset to First Beat</button>
+                            <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
+                            <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
+                            <button id="aspect_destinia_reset_beat" class="menu_button">First Plot Point</button>
                             <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
                         </div>
                     </div>
@@ -1794,10 +1781,10 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-section-title">Timeline JSON</div>
                         <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_timeline_export" class="menu_button">Export Timeline JSON</button>
-                            <button id="aspect_destinia_timeline_import" class="menu_button">Import Timeline JSON</button>
-                            <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate objectives</button>
-                            <button id="aspect_destinia_fix_objectives" class="menu_button">Fix objectives</button>
+                            <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
+                            <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
+                            <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
+                            <button id="aspect_destinia_fix_objectives" class="menu_button">Fix Objectives</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -1864,7 +1851,7 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Intent Evaluator Prompt</label>
+                            <label class="aspect-destinia-label">Evaluator Prompt</label>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
                         </div>
                     </div>
@@ -1909,11 +1896,6 @@ function bindUI() {
 
     $('#aspect_destinia_fix_objectives').on('click', () => {
         fixTemplateObjectivesFromInput();
-    });
-
-    $('#aspect_destinia_eval').on('click', async () => {
-        await evaluateIntentIfNeededWithOptions('manual', { force: true, notify: true });
-        refreshUI();
     });
 
     $('#aspect_destinia_prev').on('click', () => stepBeat(-1));
