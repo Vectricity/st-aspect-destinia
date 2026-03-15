@@ -64,6 +64,7 @@ const DEFAULT_PROFILE = Object.freeze({
     strictness: 0.55,
     pacingBias: 0.45,
     transitionThreshold: 0.72,
+    objectiveAutoAdvanceThreshold: 0.8,
     intentWindow: 8,
     respectUserIntent: true,
     timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
@@ -88,7 +89,7 @@ const DEFAULT_PROFILE = Object.freeze({
         guidancePrinciples:
             [
                 'Treat user roleplay direction as meaningful intent.',
-                'If the user is trying to linger, deepen, explore, talk, reflect, investigate, or otherwise remain within the current beat, do not hurry the story onward.',
+                'Treat lingering intent as explicit and purposeful: direct requests to wait/not move on, unfinished investigations, or clearly important unresolved conversations.',
                 'If the user is clearly pushing events forward, initiating a transition, resolving the present situation, or steering into the next development, allow progression.',
                 'Never railroad. Make progression feel like a natural consequence of the scene.',
                 'Do not make characters state their core motivations in an explicit or meta way unless the user directly asks for that explanation.'
@@ -155,7 +156,7 @@ const DEFAULT_PROFILE = Object.freeze({
             [
                 'You are evaluating roleplay progression for a story timeline controller.',
                 'Read the recent chat and determine whether the USER is signaling that the story should stay on the current beat or may transition toward the next beat.',
-                'Respect lingering behavior. Wanting to talk more, investigate more, reflect more, train more, or dwell on consequences counts as staying on the current beat unless the user clearly pushes onward.',
+                'Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-beat task, or is engaged in an important unresolved conversation. Ordinary banter or casual dialogue alone is not lingering intent.',
                 '{{objective_completion_guidance}}',
                 'Return ONLY valid JSON with these keys:',
                 '{',
@@ -410,6 +411,137 @@ function normalizeTimeline(timeline) {
     return timeline;
 }
 
+function getObjectiveCompletionThreshold(profile) {
+    return clamp01(Number(profile?.objectiveAutoAdvanceThreshold ?? 0.8));
+}
+
+function classifyObjectiveIssues(objectiveText) {
+    const text = String(objectiveText || '').trim();
+    if (!text) {
+        return [{ type: 'vague', message: 'Objective text is empty.' }];
+    }
+
+    const issues = [];
+    const words = text.split(/\s+/).filter(Boolean);
+    const vagueStarts = /^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b/i;
+    const vaguePhrases = /\b(something|somehow|etc\.?|and more|as needed|overall|in general|everything|anything|stuff)\b/i;
+    const broadPhrases = /\b(entire|all(?:\s+of)?|every(?:thing)?|the whole|worldbuilding|storyline|main plot)\b/i;
+    const splitSignals = /\b(and|then|while|meanwhile|plus|also|before|after)\b/i;
+
+    if (words.length > 24 || /[,;:].+[,;:]/.test(text) || splitSignals.test(text) && words.length > 14) {
+        issues.push({ type: 'complicated', message: 'Objective combines too many actions and should be split.' });
+    }
+    if (words.length < 4 || vagueStarts.test(text) || vaguePhrases.test(text)) {
+        issues.push({ type: 'vague', message: 'Objective is too vague and should be more specific.' });
+    }
+    if (broadPhrases.test(text)) {
+        issues.push({ type: 'generalized', message: 'Objective is too broad/generalized for one beat.' });
+    }
+
+    return issues;
+}
+
+function buildObjectiveFixes(objectiveText) {
+    const source = String(objectiveText || '').trim();
+    if (!source) {
+        return ['Define one concrete, observable action for this beat.'];
+    }
+
+    const chunks = source
+        .split(/\s*(?:;|\.|\band then\b|\bthen\b|\bwhile\b|\bplus\b|\balso\b)\s+/i)
+        .map(part => part.trim())
+        .filter(Boolean);
+
+    const normalized = chunks.length > 1 ? chunks : [source];
+    return normalized
+        .map(part => {
+            const lowered = part.toLowerCase();
+            if (/^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b/i.test(part)) {
+                return `Make clear progress on ${lowered.replace(/^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b\s*/i, '') || 'the current beat conflict'} through one concrete scene action.`;
+            }
+            if (part.split(/\s+/).length < 4) {
+                return `Complete this specific action in-scene: ${part.replace(/[.!?]+$/g, '')}.`;
+            }
+            return part.replace(/\s+/g, ' ').replace(/^[a-z]/, c => c.toUpperCase()).replace(/[.!?]*$/g, '.');
+        })
+        .slice(0, 4);
+}
+
+function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
+    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
+    if (!parsed) {
+        toastr.error(`${MODULE_NAME}: cannot evaluate objectives because timeline JSON is invalid.`);
+        return null;
+    }
+
+    const issues = [];
+    parsed.plotPoints.forEach((point, pointIdx) => {
+        const objectives = Array.isArray(point.objectives) ? point.objectives.map(normalizeObjectiveItem) : [];
+        objectives.forEach((objective, objectiveIdx) => {
+            const objectiveIssues = classifyObjectiveIssues(objective.text);
+            if (objectiveIssues.length) {
+                issues.push({
+                    pointIdx,
+                    objectiveIdx,
+                    beatTitle: point.title || `Beat ${pointIdx + 1}`,
+                    objectiveText: objective.text || '(empty objective)',
+                    issues: objectiveIssues
+                });
+            }
+        });
+    });
+
+    if (!issues.length) {
+        if (notifyWhenHealthy) {
+            toastr.success(`${MODULE_NAME}: no vague or overly complicated objectives detected.`);
+        }
+        return { parsed, issues };
+    }
+
+    const summary = issues
+        .slice(0, 5)
+        .map(issue => `${issue.beatTitle}: ${issue.objectiveText}`)
+        .join(' | ');
+    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s). ${summary}`);
+    return { parsed, issues };
+}
+
+function fixTemplateObjectivesFromInput() {
+    const result = evaluateTemplateObjectivesFromInput(false);
+    if (!result) return;
+
+    const { parsed, issues } = result;
+    if (!issues.length) {
+        toastr.success(`${MODULE_NAME}: no objective fixes needed.`);
+        return;
+    }
+
+    let replacements = 0;
+    const issuesByBeat = new Map();
+    for (const issue of issues) {
+        if (!issuesByBeat.has(issue.pointIdx)) issuesByBeat.set(issue.pointIdx, []);
+        issuesByBeat.get(issue.pointIdx).push(issue);
+    }
+
+    for (const [pointIdx, beatIssues] of issuesByBeat.entries()) {
+        const point = parsed.plotPoints[pointIdx];
+        if (!point || !Array.isArray(point.objectives)) continue;
+
+        beatIssues
+            .sort((a, b) => b.objectiveIdx - a.objectiveIdx)
+            .forEach((issue) => {
+                const original = normalizeObjectiveItem(point.objectives[issue.objectiveIdx]);
+                const fixes = buildObjectiveFixes(original.text);
+                const fixedEntries = fixes.map(text => ({ text, completed: false }));
+                point.objectives.splice(issue.objectiveIdx, 1, ...fixedEntries);
+                replacements += 1;
+            });
+    }
+
+    $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
+    toastr.success(`${MODULE_NAME}: fixed ${replacements} objective(s). Review and save the updated template.`);
+}
+
 function formatObjectives(items) {
     if (!Array.isArray(items) || items.length === 0) return '- none';
     return items.map(item => {
@@ -657,11 +789,26 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             nextBeatSummary: getNextBeat(profile)?.summary || 'No next beat.'
         };
 
+        const updatedBeat = getCurrentBeat(profile);
+        const updatedObjectives = Array.isArray(updatedBeat?.objectives)
+            ? updatedBeat.objectives.map(normalizeObjectiveItem)
+            : [];
+        const objectiveCompletionRatio = updatedObjectives.length
+            ? updatedObjectives.filter(objective => objective.completed).length / updatedObjectives.length
+            : 0;
+        const objectiveReadyToAdvance =
+            profile.advancementMode === 'objectives' &&
+            updatedObjectives.length > 0 &&
+            objectiveCompletionRatio >= getObjectiveCompletionThreshold(profile);
+
         const canAdvance =
             profile.autoAdvance &&
-            finalDecision === 'advance' &&
-            confidence >= Number(profile.transitionThreshold || 0.72) &&
-            !!getNextBeat(profile);
+            !userWantsToLinger &&
+            !!getNextBeat(profile) &&
+            (
+                (finalDecision === 'advance' && confidence >= Number(profile.transitionThreshold || 0.72)) ||
+                objectiveReadyToAdvance
+            );
 
         if (canAdvance) {
             profile.state.currentIndex += 1;
@@ -866,9 +1013,13 @@ function evaluateIntentLocally(profile, recentChatText) {
         'leave now', 'let\'s go', 'lets go', 'proceed', 'advance'
     ];
     const weakAdvanceSignals = ['next', 'continue'];
-    const lingerSignals = [
-        'wait', 'hold on', 'stay', 'linger', 'talk more', 'investigate', 'look around',
-        'reflect', 'train', 'not yet', 'before we go', 'keep exploring', 'keep talking'
+    const explicitLingerSignals = [
+        'wait', 'hold on', 'stay', 'linger', 'not yet', 'before we go',
+        'do not move on', "don't move on", 'keep exploring', 'one more thing', 'give me a minute'
+    ];
+    const deepenTaskSignals = [
+        'investigate', 'look around', 'search', 'inspect', 'question them', 'interrogate',
+        'reflect', 'train', 'plan this out', 'discuss this first'
     ];
 
     const countSignalHits = (signals = []) => signals.filter((signal) => {
@@ -881,7 +1032,11 @@ function evaluateIntentLocally(profile, recentChatText) {
 
     const strongAdvanceHits = countSignalHits(strongAdvanceSignals);
     const weakAdvanceHits = countSignalHits(weakAdvanceSignals);
-    const lingerHits = countSignalHits(lingerSignals);
+    const explicitLingerHits = countSignalHits(explicitLingerSignals);
+    const deepenTaskHits = countSignalHits(deepenTaskSignals);
+    const importantConversationSignal = /\b(confess|confession|reveal|truth|motive|motivation|betray|betrayal|deal|agreement|negotiate|negotiation|interrogate|strategy|plan|critical|urgent|high stakes|life or death|consequence|secret|apologize|forgive)\b/i.test(interactionLower);
+    const conversationHoldSignal = /\b(talk|discuss|ask|question|explain|hear me out|we need to talk)\b/i.test(userLinesLower);
+    const lingerHits = explicitLingerHits + deepenTaskHits + (importantConversationSignal && conversationHoldSignal ? 1 : 0);
 
     let decision = 'stay';
     let confidence = 0.55;
@@ -967,16 +1122,19 @@ function evaluateIntentLocally(profile, recentChatText) {
     const completionRatio = objectiveCompletion.length > 0
         ? objectiveCompletion.filter(Boolean).length / objectiveCompletion.length
         : 0;
+    const beatCompleteFromObjectives = objectiveCompletion.length > 0
+        ? completionRatio >= getObjectiveCompletionThreshold(profile)
+        : false;
     const beatComplete = hints.length > 0
-        ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24)))
-        : objectiveCompletion.length > 0 ? completionRatio >= 0.67 : false;
+        ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24))) || beatCompleteFromObjectives
+        : beatCompleteFromObjectives;
 
     return {
         decision,
         confidence,
         reason,
         beat_complete: beatComplete,
-        user_wants_to_linger: lingerHits > 0,
+        user_wants_to_linger: explicitLingerHits > 0 || deepenTaskHits > 0 || (importantConversationSignal && conversationHoldSignal),
         objective_completion: objectiveCompletion
     };
 }
@@ -1099,6 +1257,7 @@ function profileToForm(profile) {
     $('#aspect_destinia_strictness').val(profile.strictness ?? 0.55);
     $('#aspect_destinia_pacing').val(profile.pacingBias ?? 0.45);
     $('#aspect_destinia_threshold').val(profile.transitionThreshold ?? 0.72);
+    $('#aspect_destinia_objective_threshold').val(getObjectiveCompletionThreshold(profile));
     $('#aspect_destinia_window').val(profile.intentWindow ?? 8);
     $('#aspect_destinia_chat_select').val(profile.attachedChatKey || '');
     $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
@@ -1129,6 +1288,7 @@ function clearForm() {
     $('#aspect_destinia_strictness').val(0.55);
     $('#aspect_destinia_pacing').val(0.45);
     $('#aspect_destinia_threshold').val(0.72);
+    $('#aspect_destinia_objective_threshold').val(0.8);
     $('#aspect_destinia_window').val(8);
     $('#aspect_destinia_chat_select').val('');
     $('#aspect_destinia_timeline').val(JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
@@ -1149,6 +1309,7 @@ function formToProfile(profile) {
     profile.strictness = Number($('#aspect_destinia_strictness').val() || 0.55);
     profile.pacingBias = Number($('#aspect_destinia_pacing').val() || 0.45);
     profile.transitionThreshold = Number($('#aspect_destinia_threshold').val() || 0.72);
+    profile.objectiveAutoAdvanceThreshold = clamp01(Number($('#aspect_destinia_objective_threshold').val() || 0.8));
     profile.intentWindow = Number($('#aspect_destinia_window').val() || 8);
 
     const selectedChatKey = $('#aspect_destinia_chat_select').val() || '';
@@ -1283,6 +1444,7 @@ const FIELD_DEFAULTS = {
     aspect_destinia_strictness: () => DEFAULT_PROFILE.strictness,
     aspect_destinia_pacing: () => DEFAULT_PROFILE.pacingBias,
     aspect_destinia_threshold: () => DEFAULT_PROFILE.transitionThreshold,
+    aspect_destinia_objective_threshold: () => DEFAULT_PROFILE.objectiveAutoAdvanceThreshold,
     aspect_destinia_timeline: () => JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     aspect_destinia_prompt_intro: () => DEFAULT_PROFILE.prompts.injectionIntro,
     aspect_destinia_prompt_principles: () => DEFAULT_PROFILE.prompts.guidancePrinciples,
@@ -1530,6 +1692,7 @@ function updateSliderDisplays() {
     $('#aspect_destinia_strictness_value').text(Number($('#aspect_destinia_strictness').val() || 0).toFixed(2));
     $('#aspect_destinia_pacing_value').text(Number($('#aspect_destinia_pacing').val() || 0).toFixed(2));
     $('#aspect_destinia_threshold_value').text(Number($('#aspect_destinia_threshold').val() || 0).toFixed(2));
+    $('#aspect_destinia_objective_threshold_value').text(`${Math.round(clamp01(Number($('#aspect_destinia_objective_threshold').val() || 0)) * 100)}%`);
 }
 
 function buildSettingsHtml() {
@@ -1606,6 +1769,10 @@ function buildSettingsHtml() {
                                 <label class="aspect-destinia-label">Transition Threshold <span id="aspect_destinia_threshold_value"></span></label>
                                 <input id="aspect_destinia_threshold" type="range" min="0.5" max="0.95" step="0.01" />
                             </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold <span id="aspect_destinia_objective_threshold_value"></span></label>
+                                <input id="aspect_destinia_objective_threshold" type="range" min="0.5" max="1" step="0.05" />
+                            </div>
                         </div>
 
                         <div class="aspect-destinia-actions">
@@ -1629,6 +1796,8 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-actions">
                             <button id="aspect_destinia_timeline_export" class="menu_button">Export Timeline JSON</button>
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import Timeline JSON</button>
+                            <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate objectives</button>
+                            <button id="aspect_destinia_fix_objectives" class="menu_button">Fix objectives</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -1734,6 +1903,14 @@ function bindUI() {
         }
     });
 
+    $('#aspect_destinia_eval_objectives').on('click', () => {
+        evaluateTemplateObjectivesFromInput(true);
+    });
+
+    $('#aspect_destinia_fix_objectives').on('click', () => {
+        fixTemplateObjectivesFromInput();
+    });
+
     $('#aspect_destinia_eval').on('click', async () => {
         await evaluateIntentIfNeededWithOptions('manual', { force: true, notify: true });
         refreshUI();
@@ -1744,7 +1921,7 @@ function bindUI() {
     $('#aspect_destinia_reset_beat').on('click', resetCurrentBeatToFirst);
     $('#aspect_destinia_clear_chat').on('click', clearCurrentChatMessages);
 
-    $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold').on('input', updateSliderDisplays);
+    $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
 
     addFieldResetButtons();
 
