@@ -840,14 +840,26 @@ async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatTex
 
 function evaluateIntentLocally(profile, recentChatText) {
     const text = String(recentChatText || '');
-    const userLines = text
+    const roleTaggedLines = text
         .split('\n')
         .map(line => line.trim())
+        .filter(line => /^\d+\.\s*(user|assistant)\s*:/i.test(line));
+
+    const userLines = roleTaggedLines
         .filter(line => /^\d+\.\s*user\s*:/i.test(line))
-        .slice(-2)
+        .slice(-3)
         .map(line => line.replace(/^\d+\.\s*user\s*:/i, '').trim())
         .join(' ');
+
+    const assistantLines = roleTaggedLines
+        .filter(line => /^\d+\.\s*assistant\s*:/i.test(line))
+        .slice(-3)
+        .map(line => line.replace(/^\d+\.\s*assistant\s*:/i, '').trim())
+        .join(' ');
+
     const userLinesLower = userLines.toLowerCase();
+    const assistantLinesLower = assistantLines.toLowerCase();
+    const interactionLower = `${userLinesLower} ${assistantLinesLower}`.trim();
 
     const strongAdvanceSignals = [
         'move on', 'head to', 'after this', 'done here', 'finished here',
@@ -899,32 +911,52 @@ function evaluateIntentLocally(profile, recentChatText) {
         'we did', 'we have', 'we got', 'we learned', 'we found', 'we established', 'we covered', 'we confirmed',
         'i did', 'i have', 'i got', 'i learned', 'i found', 'i established', 'i covered', 'i confirmed'
     ];
-    const userWordSet = new Set((userLinesLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
+    const interactionWordSet = new Set((interactionLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
 
     const hasObjectiveCompletionSignal = (objectiveText) => {
         const objectiveWords = String(objectiveText || '')
             .toLowerCase()
             .replace(/[^a-z0-9'\s]/g, ' ')
             .split(/\s+/)
-            .filter(word => word.length > 3);
+            .filter(word => word.length > 2 && !['the', 'and', 'with', 'from', 'that', 'this', 'into', 'about'].includes(word));
 
         if (!objectiveWords.length) return false;
 
-        const matchedWords = objectiveWords.filter(word => userWordSet.has(word));
+        const interactionWords = Array.from(interactionWordSet);
+        const stems = objectiveWords.map(word => word.replace(/(ing|ed|es|s)$/i, ''));
+        const matchedWords = objectiveWords.filter(word => interactionWordSet.has(word));
+        const matchedStems = stems.filter(stem => stem && interactionWords.some(word => word.startsWith(stem) || stem.startsWith(word)));
         const overlapRatio = matchedWords.length / objectiveWords.length;
-        const hasCompletionVerb = completionVerbSignals.some(signal => userLinesLower.includes(signal));
+        const stemOverlapRatio = matchedStems.length / objectiveWords.length;
+        const hasCompletionVerb = completionVerbSignals.some(signal => interactionLower.includes(signal));
+        const hasProgressSignal = progressSignals.some(signal => interactionLower.includes(signal));
 
-        const hasProgressSignal = progressSignals.some(signal => userLinesLower.includes(signal));
-
-        if (overlapRatio >= 0.5 || (matchedWords.length >= 3 && overlapRatio >= 0.35)) {
+        if (overlapRatio >= 0.28 || stemOverlapRatio >= 0.4 || (matchedWords.length >= 2 && overlapRatio >= 0.2)) {
             return true;
         }
 
-        if (hasCompletionVerb && matchedWords.length >= 2) {
+        const userInquirySignal = /\?|\b(ask|asked|question|questions|tell me|who are|what are|why are|how do|about yourself)\b/i.test(userLinesLower);
+        const userInvestigationSignal = /\b(investigate|inspect|examine|search|look around|probe|question|interrogate|press|follow up|dig into)\b/i.test(userLinesLower);
+        const assistantDisclosureSignal = /\b(i am|i'm|my |me |i was|i feel|i want|i think|i believe|i remember|i used to)\b/i.test(assistantLinesLower);
+        const assistantRevealSignal = /\b(reveal|revealed|discover|discovered|found|learned|turns out|it appears|clue|evidence|truth)\b/i.test(assistantLinesLower);
+
+        const objectiveLower = String(objectiveText || '').toLowerCase();
+        const isCharacterInsightObjective = /\b(personality|motivation|motive|belief|fear|desire|backstory|past|trait|core|character)\b/.test(objectiveLower);
+        const isInvestigationObjective = /\b(uncover|discover|investigate|find|learn|identify|understand|clue|evidence|truth|mystery|cause)\b/.test(objectiveLower);
+
+        if (isCharacterInsightObjective && userInquirySignal && assistantDisclosureSignal) {
             return true;
         }
 
-        return hasProgressSignal && matchedWords.length >= 2;
+        if (isInvestigationObjective && userInvestigationSignal && assistantRevealSignal) {
+            return true;
+        }
+
+        if (hasCompletionVerb && (matchedWords.length >= 1 || matchedStems.length >= 2)) {
+            return true;
+        }
+
+        return hasProgressSignal && (matchedWords.length >= 1 || matchedStems.length >= 2);
     };
 
     const objectiveCompletion = objectives.map(objective => {
@@ -1147,6 +1179,28 @@ function formToProfile(profile) {
 }
 
 
+function buildExportFilename(label, extension = 'json') {
+    const sanitizedLabel = String(label || 'export')
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase() || 'export';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${sanitizedLabel}_${stamp}.${extension}`;
+}
+
+function downloadJsonToFile(payload, filenameLabel) {
+    const serialized = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    const blob = new Blob([serialized], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = buildExportFilename(filenameLabel, 'json');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+}
+
 function exportDisplayedProfileToFile() {
     const profile = getDisplayedProfile();
     if (!profile) {
@@ -1154,15 +1208,47 @@ function exportDisplayedProfileToFile() {
         return;
     }
 
-    const payload = JSON.stringify(profile, null, 2);
-    const blob = new Blob([payload], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${(profile.entryName || 'destinia-entry').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(link.href);
+    downloadJsonToFile(profile, `${profile.entryName || 'destinia_entry'}_entry`);
+}
+
+function exportTimelineToFile() {
+    const timelineText = String($('#aspect_destinia_timeline').val() || '').trim();
+    if (!timelineText) {
+        toastr.warning(`${MODULE_NAME}: timeline JSON is empty.`);
+        return;
+    }
+
+    const parsed = safeParseTimeline(timelineText);
+    if (!parsed) {
+        toastr.error(`${MODULE_NAME}: cannot export invalid timeline JSON.`);
+        return;
+    }
+
+    downloadJsonToFile(parsed, 'timeline_json');
+}
+
+function importTimelineFromFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const text = String(reader.result || '').trim();
+            const parsed = safeParseTimeline(text);
+            if (!parsed) {
+                throw new Error('timeline JSON must include plotPoints[].');
+            }
+
+            $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
+            toastr.success(`${MODULE_NAME}: imported timeline JSON from file.`);
+        } catch (err) {
+            toastr.error(`${MODULE_NAME}: failed to import timeline (${err.message}).`);
+        } finally {
+            $('#aspect_destinia_timeline_import_file').val('');
+        }
+    };
+    reader.readAsText(file);
 }
 
 function importProfileFromFile(event) {
@@ -1193,7 +1279,6 @@ function importProfileFromFile(event) {
 }
 
 const FIELD_DEFAULTS = {
-    aspect_destinia_mode: () => DEFAULT_PROFILE.advancementMode,
     aspect_destinia_window: () => DEFAULT_PROFILE.intentWindow,
     aspect_destinia_strictness: () => DEFAULT_PROFILE.strictness,
     aspect_destinia_pacing: () => DEFAULT_PROFILE.pacingBias,
@@ -1263,13 +1348,18 @@ async function clearCurrentChatMessages() {
     try {
         if (typeof ctx.clearChat === 'function') {
             await ctx.clearChat();
+        }
+
+        if (Array.isArray(ctx.chat)) {
+            ctx.chat.splice(0, ctx.chat.length);
         } else {
-            ctx.chat.splice(0, count);
-            if (typeof ctx.saveChat === 'function') {
-                await ctx.saveChat();
-            } else if (typeof ctx.saveChatDebounced === 'function') {
-                ctx.saveChatDebounced();
-            }
+            ctx.chat = [];
+        }
+
+        if (typeof ctx.saveChat === 'function') {
+            await ctx.saveChat();
+        } else if (typeof ctx.saveChatDebounced === 'function') {
+            ctx.saveChatDebounced();
         }
 
         toastr.success(`${MODULE_NAME}: deleted ${count} message(s) from the current chat.`);
@@ -1536,6 +1626,11 @@ function buildSettingsHtml() {
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-section-title">Timeline JSON</div>
                         <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
+                        <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_timeline_export" class="menu_button">Export Timeline JSON</button>
+                            <button id="aspect_destinia_timeline_import" class="menu_button">Import Timeline JSON</button>
+                            <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
+                        </div>
                     </div>
 
                     <div class="aspect-destinia-card">
@@ -1626,6 +1721,9 @@ function bindUI() {
     $('#aspect_destinia_export').on('click', exportDisplayedProfileToFile);
     $('#aspect_destinia_import').on('click', () => $('#aspect_destinia_import_file').trigger('click'));
     $('#aspect_destinia_import_file').on('change', importProfileFromFile);
+    $('#aspect_destinia_timeline_export').on('click', exportTimelineToFile);
+    $('#aspect_destinia_timeline_import').on('click', () => $('#aspect_destinia_timeline_import_file').trigger('click'));
+    $('#aspect_destinia_timeline_import_file').on('change', importTimelineFromFile);
 
     $('#aspect_destinia_validate').on('click', () => {
         const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
