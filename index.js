@@ -90,7 +90,8 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Treat user roleplay direction as meaningful intent.',
                 'If the user is trying to linger, deepen, explore, talk, reflect, investigate, or otherwise remain within the current beat, do not hurry the story onward.',
                 'If the user is clearly pushing events forward, initiating a transition, resolving the present situation, or steering into the next development, allow progression.',
-                'Never railroad. Make progression feel like a natural consequence of the scene.'
+                'Never railroad. Make progression feel like a natural consequence of the scene.',
+                'Do not make characters state their core motivations in an explicit or meta way unless the user directly asks for that explanation.'
             ].join('\n'),
 
         currentBeatTemplate:
@@ -147,11 +148,15 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Lower pacing bias means slower development; higher pacing bias means more visible narrative momentum.'
             ].join('\n'),
 
+        objectiveCompletionGuidance:
+            'Mark objective_completion as true when the user meaningfully demonstrates progress equivalent to an objective, even if phrasing is paraphrased, implied, or distributed across recent messages. Keep false when evidence is weak or absent.',
+
         evaluatorPrompt:
             [
                 'You are evaluating roleplay progression for a story timeline controller.',
                 'Read the recent chat and determine whether the USER is signaling that the story should stay on the current beat or may transition toward the next beat.',
                 'Respect lingering behavior. Wanting to talk more, investigate more, reflect more, train more, or dwell on consequences counts as staying on the current beat unless the user clearly pushes onward.',
+                '{{objective_completion_guidance}}',
                 'Return ONLY valid JSON with these keys:',
                 '{',
                 '  "decision": "stay" | "advance",',
@@ -442,6 +447,7 @@ function buildTemplateData(profile) {
         current_objective_completion_inline: Array.isArray(current.objectives)
             ? current.objectives.map(o => `${normalizeObjectiveItem(o).text}: ${normalizeObjectiveItem(o).completed ? 'true' : 'false'}`).join('; ')
             : '',
+        objective_completion_guidance: profile.prompts?.objectiveCompletionGuidance || '',
         transition_requirements: current.transitionGuidance || 'No transition guidance provided.',
         current_hints_inline: Array.isArray(current.completionHints) ? current.completionHints.join('; ') : '',
         next_title: next.title || 'None',
@@ -889,6 +895,10 @@ function evaluateIntentLocally(profile, recentChatText) {
     const completionVerbSignals = [
         'done', 'completed', 'finished', 'resolved', 'handled', 'achieved', 'accomplished', 'wrapped up', 'took care of'
     ];
+    const progressSignals = [
+        'we did', 'we have', 'we got', 'we learned', 'we found', 'we established', 'we covered', 'we confirmed',
+        'i did', 'i have', 'i got', 'i learned', 'i found', 'i established', 'i covered', 'i confirmed'
+    ];
     const userWordSet = new Set((userLinesLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
 
     const hasObjectiveCompletionSignal = (objectiveText) => {
@@ -904,11 +914,17 @@ function evaluateIntentLocally(profile, recentChatText) {
         const overlapRatio = matchedWords.length / objectiveWords.length;
         const hasCompletionVerb = completionVerbSignals.some(signal => userLinesLower.includes(signal));
 
-        if (overlapRatio >= 0.6 || (matchedWords.length >= 3 && overlapRatio >= 0.4)) {
+        const hasProgressSignal = progressSignals.some(signal => userLinesLower.includes(signal));
+
+        if (overlapRatio >= 0.5 || (matchedWords.length >= 3 && overlapRatio >= 0.35)) {
             return true;
         }
 
-        return hasCompletionVerb && matchedWords.length >= 2;
+        if (hasCompletionVerb && matchedWords.length >= 2) {
+            return true;
+        }
+
+        return hasProgressSignal && matchedWords.length >= 2;
     };
 
     const objectiveCompletion = objectives.map(objective => {
@@ -916,9 +932,12 @@ function evaluateIntentLocally(profile, recentChatText) {
         if (hasObjectiveCompletionSignal(objective.text)) return true;
         return false;
     });
+    const completionRatio = objectiveCompletion.length > 0
+        ? objectiveCompletion.filter(Boolean).length / objectiveCompletion.length
+        : 0;
     const beatComplete = hints.length > 0
         ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24)))
-        : objectiveCompletion.length > 0 ? objectiveCompletion.every(Boolean) : false;
+        : objectiveCompletion.length > 0 ? completionRatio >= 0.67 : false;
 
     return {
         decision,
@@ -1029,7 +1048,6 @@ function attachSelectedProfileToCurrentChat() {
 function getDisplayedProfile() {
     const selectedId = $('#aspect_destinia_profile_select').val() || getLinkedProfileIdForCurrentChat() || getSelectedProfileId();
     if (!selectedId) return null;
-    setSelectedProfileId(selectedId);
     return getProfileById(selectedId);
 }
 
@@ -1040,7 +1058,7 @@ function profileToForm(profile) {
     }
 
     $('#aspect_destinia_profile_select').val(profile.id);
-    $('#aspect_destinia_entry_name_display').text(profile.entryName || 'Untitled Entry');
+    $('#aspect_destinia_entry_name').val(profile.entryName || 'Untitled Entry');
     $('#aspect_destinia_enabled').prop('checked', !!profile.enabled);
     $('#aspect_destinia_mode').val(profile.advancementMode || 'objectives');
     $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
@@ -1063,13 +1081,14 @@ function profileToForm(profile) {
     $('#aspect_destinia_prompt_linger').val(profile.prompts.lingerInstruction || '');
     $('#aspect_destinia_prompt_advance').val(profile.prompts.advanceInstruction || '');
     $('#aspect_destinia_prompt_pacing').val(profile.prompts.pacingInstruction || '');
+    $('#aspect_destinia_prompt_objective_guidance').val(profile.prompts.objectiveCompletionGuidance || '');
     $('#aspect_destinia_prompt_evaluator').val(profile.prompts.evaluatorPrompt || '');
 
     renderStatus(profile);
 }
 
 function clearForm() {
-    $('#aspect_destinia_entry_name_display').text('');
+    $('#aspect_destinia_entry_name').val('');
     $('#aspect_destinia_enabled').prop('checked', true);
     $('#aspect_destinia_mode').val('objectives');
     $('#aspect_destinia_auto_advance').prop('checked', true);
@@ -1089,7 +1108,7 @@ function formToProfile(profile) {
         throw new Error('Timeline JSON must be valid and include plotPoints[].');
     }
 
-    profile.entryName = $('#aspect_destinia_entry_name_display').text().trim() || profile.entryName || 'Untitled Entry';
+    profile.entryName = $('#aspect_destinia_entry_name').val().trim() || profile.entryName || 'Untitled Entry';
     profile.enabled = $('#aspect_destinia_enabled').is(':checked');
     profile.advancementMode = $('#aspect_destinia_mode').val();
     profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
@@ -1118,6 +1137,7 @@ function formToProfile(profile) {
     profile.prompts.lingerInstruction = $('#aspect_destinia_prompt_linger').val();
     profile.prompts.advanceInstruction = $('#aspect_destinia_prompt_advance').val();
     profile.prompts.pacingInstruction = $('#aspect_destinia_prompt_pacing').val();
+    profile.prompts.objectiveCompletionGuidance = $('#aspect_destinia_prompt_objective_guidance').val();
     profile.prompts.evaluatorPrompt = $('#aspect_destinia_prompt_evaluator').val();
 
     const totalBeats = profile.timeline.plotPoints.length;
@@ -1172,18 +1192,91 @@ function importProfileFromFile(event) {
     reader.readAsText(file);
 }
 
-function promptRenameEntry() {
-    const profile = getDisplayedProfile();
-    if (!profile) {
-        toastr.warning(`${MODULE_NAME}: select an entry to rename.`);
+const FIELD_DEFAULTS = {
+    aspect_destinia_mode: () => DEFAULT_PROFILE.advancementMode,
+    aspect_destinia_window: () => DEFAULT_PROFILE.intentWindow,
+    aspect_destinia_strictness: () => DEFAULT_PROFILE.strictness,
+    aspect_destinia_pacing: () => DEFAULT_PROFILE.pacingBias,
+    aspect_destinia_threshold: () => DEFAULT_PROFILE.transitionThreshold,
+    aspect_destinia_timeline: () => JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
+    aspect_destinia_prompt_intro: () => DEFAULT_PROFILE.prompts.injectionIntro,
+    aspect_destinia_prompt_principles: () => DEFAULT_PROFILE.prompts.guidancePrinciples,
+    aspect_destinia_prompt_current: () => DEFAULT_PROFILE.prompts.currentBeatTemplate,
+    aspect_destinia_prompt_next: () => DEFAULT_PROFILE.prompts.nextBeatTemplate,
+    aspect_destinia_prompt_transition: () => DEFAULT_PROFILE.prompts.transitionTemplate,
+    aspect_destinia_prompt_objectives: () => DEFAULT_PROFILE.prompts.objectiveModeTemplate,
+    aspect_destinia_prompt_hints: () => DEFAULT_PROFILE.prompts.hintModeTemplate,
+    aspect_destinia_prompt_linger: () => DEFAULT_PROFILE.prompts.lingerInstruction,
+    aspect_destinia_prompt_advance: () => DEFAULT_PROFILE.prompts.advanceInstruction,
+    aspect_destinia_prompt_pacing: () => DEFAULT_PROFILE.prompts.pacingInstruction,
+    aspect_destinia_prompt_objective_guidance: () => DEFAULT_PROFILE.prompts.objectiveCompletionGuidance,
+    aspect_destinia_prompt_evaluator: () => DEFAULT_PROFILE.prompts.evaluatorPrompt,
+};
+
+function resetFieldToDefault(fieldId) {
+    const factory = FIELD_DEFAULTS[fieldId];
+    if (!factory) return;
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+
+    const value = factory();
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        el.value = String(value ?? '');
+    }
+
+    if (fieldId === 'aspect_destinia_timeline') {
+        const parsed = safeParseTimeline(String(value || ''));
+        if (!parsed) {
+            toastr.error(`${MODULE_NAME}: failed to reset timeline to defaults.`);
+        }
+    }
+
+    updateSliderDisplays();
+    toastr.info(`${MODULE_NAME}: reset field to default.`);
+}
+
+function addFieldResetButtons() {
+    for (const fieldId of Object.keys(FIELD_DEFAULTS)) {
+        const fieldEl = document.getElementById(fieldId);
+        if (!fieldEl) continue;
+        if (document.querySelector(`.aspect-destinia-field-reset[data-for="${fieldId}"]`)) continue;
+
+        const btn = document.createElement('button');
+        btn.className = 'menu_button aspect-destinia-field-reset';
+        btn.type = 'button';
+        btn.dataset.for = fieldId;
+        btn.textContent = 'Reset field to default';
+        btn.addEventListener('click', () => resetFieldToDefault(fieldId));
+
+        fieldEl.insertAdjacentElement('afterend', btn);
+    }
+}
+
+async function clearCurrentChatMessages() {
+    const ctx = getCtx();
+    const count = Array.isArray(ctx.chat) ? ctx.chat.length : 0;
+    if (!count) {
+        toastr.info(`${MODULE_NAME}: current chat is already empty.`);
         return;
     }
 
-    const nextName = prompt('Rename entry', profile.entryName || '');
-    if (nextName === null) return;
-    profile.entryName = nextName.trim() || profile.entryName;
-    persistProfile(profile);
-    refreshUI();
+    try {
+        if (typeof ctx.clearChat === 'function') {
+            await ctx.clearChat();
+        } else {
+            ctx.chat.splice(0, count);
+            if (typeof ctx.saveChat === 'function') {
+                await ctx.saveChat();
+            } else if (typeof ctx.saveChatDebounced === 'function') {
+                ctx.saveChatDebounced();
+            }
+        }
+
+        toastr.success(`${MODULE_NAME}: deleted ${count} message(s) from the current chat.`);
+        renderDiagnosticForLatestAssistantMessage();
+    } catch (err) {
+        toastr.error(`${MODULE_NAME}: failed to clear current chat (${err.message}).`);
+    }
 }
 
 function saveDisplayedProfile() {
@@ -1368,9 +1461,8 @@ function buildSettingsHtml() {
                                         <select id="aspect_destinia_profile_select"></select>
                                         <span class="aspect-destinia-select-arrow">▾</span>
                                     </div>
-                                    <button id="aspect_destinia_rename" class="menu_button menu_button_icon" title="Rename Entry"><i class="fa-solid fa-pen"></i></button>
                                 </div>
-                                <div id="aspect_destinia_entry_name_display" class="aspect-destinia-entry-name-display"></div>
+                                <input id="aspect_destinia_entry_name" type="text" placeholder="Entry name" />
                             </div>
                             <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Entry</button>
                             <button id="aspect_destinia_create" class="menu_button">Create Entry for Current Chat</button>
@@ -1432,6 +1524,7 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_prev" class="menu_button">Previous Beat</button>
                             <button id="aspect_destinia_next" class="menu_button">Next Beat</button>
                             <button id="aspect_destinia_reset_beat" class="menu_button">Reset to First Beat</button>
+                            <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
                         </div>
                     </div>
 
@@ -1502,6 +1595,11 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Objective Completion Guidance</label>
+                            <textarea id="aspect_destinia_prompt_objective_guidance"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-field">
                             <label class="aspect-destinia-label">Intent Evaluator Prompt</label>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
                         </div>
@@ -1528,7 +1626,6 @@ function bindUI() {
     $('#aspect_destinia_export').on('click', exportDisplayedProfileToFile);
     $('#aspect_destinia_import').on('click', () => $('#aspect_destinia_import_file').trigger('click'));
     $('#aspect_destinia_import_file').on('change', importProfileFromFile);
-    $('#aspect_destinia_rename').on('click', promptRenameEntry);
 
     $('#aspect_destinia_validate').on('click', () => {
         const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
@@ -1547,8 +1644,11 @@ function bindUI() {
     $('#aspect_destinia_prev').on('click', () => stepBeat(-1));
     $('#aspect_destinia_next').on('click', () => stepBeat(1));
     $('#aspect_destinia_reset_beat').on('click', resetCurrentBeatToFirst);
+    $('#aspect_destinia_clear_chat').on('click', clearCurrentChatMessages);
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold').on('input', updateSliderDisplays);
+
+    addFieldResetButtons();
 
 }
 
@@ -1564,6 +1664,7 @@ function onChatChanged() {
     registerKnownChat();
     refreshUI();
     updateExtensionPrompt();
+    renderDiagnosticForLatestAssistantMessage();
 }
 
 function bindEvents() {
@@ -1594,5 +1695,6 @@ jQuery(async () => {
 
     refreshUI();
     updateExtensionPrompt();
+    renderDiagnosticForLatestAssistantMessage();
     console.log(`[${MODULE_NAME}] loaded`);
 });
