@@ -761,6 +761,35 @@ function closeObjectiveReportModal() {
     $('#aspect_destinia_objective_report_modal').removeClass('open').attr('aria-hidden', 'true');
 }
 
+function isDestiniaSettingsVisible() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return false;
+    return root.offsetParent !== null;
+}
+
+function closeObjectiveReportModalIfSettingsHidden() {
+    if (!isDestiniaSettingsVisible()) {
+        closeObjectiveReportModal();
+    }
+}
+
+function setupObjectiveReportAutoClose() {
+    const settingsHost = document.getElementById('extensions_settings');
+    if (!settingsHost || settingsHost.dataset.aspectDestiniaReportObserverBound === '1') return;
+
+    settingsHost.dataset.aspectDestiniaReportObserverBound = '1';
+    const observer = new MutationObserver(() => {
+        closeObjectiveReportModalIfSettingsHidden();
+    });
+    observer.observe(settingsHost, { attributes: true, attributeFilter: ['class', 'style'] });
+
+    document.addEventListener('click', () => {
+        window.setTimeout(closeObjectiveReportModalIfSettingsHidden, 0);
+    }, true);
+
+    window.addEventListener('resize', closeObjectiveReportModalIfSettingsHidden);
+}
+
 function renderObjectiveEvaluationReportModal() {
     const modal = $('#aspect_destinia_objective_report_modal');
     const body = $('#aspect_destinia_objective_report_body');
@@ -2459,6 +2488,7 @@ function renderRoot() {
 
     ensureBusyIndicator();
     bindUI();
+    setupObjectiveReportAutoClose();
     refreshUI();
 }
 
