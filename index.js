@@ -489,9 +489,14 @@ function getSillyTavernConnectionProfiles() {
         ctx.connection_profiles,
         ctx.chatCompletionConnectionProfiles,
         ctx.chat_completion_connection_profiles,
+        ctx.chatCompletionSettings?.profiles,
+        ctx.chat_completion_settings?.profiles,
+        ctx.chatCompletionConfig?.profiles,
+        ctx.chat_completion_config?.profiles,
         ctx.extensionSettings?.connectionProfiles,
         ctx.extensionSettings?.connection_profiles,
-        ctx.extensionSettings?.connections?.profiles
+        ctx.extensionSettings?.connections?.profiles,
+        ...findNestedCollectionsByPathKeywords(ctx, ['connection', 'profile'])
     ].filter(Boolean);
 
     for (const candidate of candidates) {
@@ -499,7 +504,7 @@ function getSillyTavernConnectionProfiles() {
         const profiles = arr
             .map((item) => {
                 if (typeof item === 'string') return { value: item, label: item };
-                const value = item?.id || item?.name || item?.value || item?.profile || item?.uid;
+                const value = item?.id || item?.name || item?.value || item?.profile || item?.uid || item?.api_id;
                 const label = item?.label || item?.name || item?.title || value;
                 return value ? { value: String(value), label: String(label) } : null;
             })
@@ -515,11 +520,16 @@ function getSillyTavernChatPresets() {
     const candidates = [
         ctx.chatCompletionPresets,
         ctx.chat_completion_presets,
+        ctx.chatCompletionSettings?.presets,
+        ctx.chat_completion_settings?.presets,
+        ctx.chatCompletionConfig?.presets,
+        ctx.chat_completion_config?.presets,
         ctx.presets,
         ctx.presetList,
         ctx.extensionSettings?.chat_completion?.presets,
         ctx.extensionSettings?.presets,
-        ctx.extensionSettings?.instruct?.presets
+        ctx.extensionSettings?.instruct?.presets,
+        ...findNestedCollectionsByPathKeywords(ctx, ['preset'])
     ].filter(Boolean);
 
     for (const candidate of candidates) {
@@ -527,7 +537,7 @@ function getSillyTavernChatPresets() {
         const presets = arr
             .map((item) => {
                 if (typeof item === 'string') return { value: item, label: item };
-                const value = item?.id || item?.name || item?.value || item?.preset || item?.uid;
+                const value = item?.id || item?.name || item?.value || item?.preset || item?.uid || item?.api_id;
                 const label = item?.label || item?.name || item?.title || value;
                 return value ? { value: String(value), label: String(label) } : null;
             })
@@ -536,6 +546,45 @@ function getSillyTavernChatPresets() {
     }
 
     return [];
+}
+
+function findNestedCollectionsByPathKeywords(root, requiredKeywords = []) {
+    const matches = [];
+    const seen = new WeakSet();
+    const keywords = requiredKeywords.map(k => String(k).toLowerCase()).filter(Boolean);
+
+    const walk = (value, path, depth) => {
+        if (!value || typeof value !== 'object' || depth > 4 || seen.has(value)) return;
+        seen.add(value);
+
+        if (Array.isArray(value)) {
+            if (value.length && pathMatches(path, keywords)) {
+                matches.push(value);
+            }
+            for (const item of value) {
+                walk(item, path, depth + 1);
+            }
+            return;
+        }
+
+        const entries = Object.entries(value);
+        if (entries.length && pathMatches(path, keywords)) {
+            matches.push(value);
+        }
+
+        for (const [key, nested] of entries) {
+            walk(nested, [...path, key], depth + 1);
+        }
+    };
+
+    walk(root, [], 0);
+    return matches;
+}
+
+function pathMatches(path, keywords) {
+    if (!keywords.length) return true;
+    const loweredPath = path.map(part => String(part).toLowerCase());
+    return keywords.every(keyword => loweredPath.some(part => part.includes(keyword)));
 }
 
 function renderEvaluatorModelOptions(profile) {
