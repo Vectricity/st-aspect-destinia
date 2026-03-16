@@ -66,6 +66,8 @@ const DEFAULT_PROFILE = Object.freeze({
     transitionThreshold: 0.72,
     objectiveAutoAdvanceThreshold: 0.8,
     intentWindow: 8,
+    llmConnectionProfile: '',
+    llmPreset: '',
     respectUserIntent: true,
     timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     timeline: structuredClone(DEFAULT_TIMELINE_TEMPLATE),
@@ -451,25 +453,126 @@ function buildObjectiveFixes(objectiveText) {
         return ['Define one concrete, observable action for this beat.'];
     }
 
-    const chunks = source
-        .split(/\s*(?:;|\.|\band then\b|\bthen\b|\bwhile\b|\bplus\b|\balso\b|\band\b)\s+/i)
+    const normalizeSentence = (text) => text
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^[a-z]/, c => c.toUpperCase())
+        .replace(/[.!?]*$/g, '.');
+
+    const splitCandidates = source
+        .split(/\s*;\s*/)
         .map(part => part.trim())
         .filter(Boolean);
 
-    const normalized = chunks.length > 1 ? chunks : [source];
-    return normalized
-        .map(part => {
-            const lowered = part.toLowerCase();
-            if (/^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b/i.test(part)) {
-                return `Make clear progress on ${lowered.replace(/^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b\s*/i, '') || 'the current beat conflict'} through one concrete scene action.`;
+    const actionableVerb = /\b(establish|introduce|surface|create|allow|show|reveal|confirm|decide|identify|choose|confront|admit|discover|resolve|agree|refuse|learn|find|state|demonstrate|deepen|highlight)\b/i;
+    const clauses = splitCandidates.length > 1 ? splitCandidates : [source];
+
+    return clauses
+        .map((clause) => {
+            const compact = clause.replace(/\s+/g, ' ').trim();
+            if (!compact) return null;
+
+            if (compact.split(/\s+/).length < 5 || !actionableVerb.test(compact)) {
+                return normalizeSentence(`Show one concrete in-scene action that demonstrates: ${compact.replace(/[.!?]+$/g, '')}`);
             }
-            if (part.split(/\s+/).length < 4) {
-                return `Complete this specific action in-scene: ${part.replace(/[.!?]+$/g, '')}.`;
-            }
-            return part.replace(/\s+/g, ' ').replace(/^[a-z]/, c => c.toUpperCase()).replace(/[.!?]*$/g, '.');
+
+            return normalizeSentence(compact);
         })
-        .slice(0, 4);
+        .filter(Boolean)
+        .slice(0, 3);
 }
+
+function getSillyTavernConnectionProfiles() {
+    const ctx = getCtx();
+    const candidates = [
+        ctx.connectionProfiles,
+        ctx.connection_profiles,
+        ctx.chatCompletionConnectionProfiles,
+        ctx.chat_completion_connection_profiles,
+        ctx.extensionSettings?.connectionProfiles,
+        ctx.extensionSettings?.connection_profiles,
+        ctx.extensionSettings?.connections?.profiles
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const arr = Array.isArray(candidate) ? candidate : Object.values(candidate || {});
+        const profiles = arr
+            .map((item) => {
+                if (typeof item === 'string') return { value: item, label: item };
+                const value = item?.id || item?.name || item?.value || item?.profile || item?.uid;
+                const label = item?.label || item?.name || item?.title || value;
+                return value ? { value: String(value), label: String(label) } : null;
+            })
+            .filter(Boolean);
+        if (profiles.length) return profiles;
+    }
+
+    return [];
+}
+
+function getSillyTavernChatPresets() {
+    const ctx = getCtx();
+    const candidates = [
+        ctx.chatCompletionPresets,
+        ctx.chat_completion_presets,
+        ctx.presets,
+        ctx.presetList,
+        ctx.extensionSettings?.chat_completion?.presets,
+        ctx.extensionSettings?.presets,
+        ctx.extensionSettings?.instruct?.presets
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const arr = Array.isArray(candidate) ? candidate : Object.values(candidate || {});
+        const presets = arr
+            .map((item) => {
+                if (typeof item === 'string') return { value: item, label: item };
+                const value = item?.id || item?.name || item?.value || item?.preset || item?.uid;
+                const label = item?.label || item?.name || item?.title || value;
+                return value ? { value: String(value), label: String(label) } : null;
+            })
+            .filter(Boolean);
+        if (presets.length) return presets;
+    }
+
+    return [];
+}
+
+function renderEvaluatorModelOptions(profile) {
+    const connectionSelect = $('#aspect_destinia_eval_connection');
+    const presetSelect = $('#aspect_destinia_eval_preset');
+    if (!connectionSelect.length || !presetSelect.length) return;
+
+    const profiles = getSillyTavernConnectionProfiles();
+    const presets = getSillyTavernChatPresets();
+
+    connectionSelect.empty().append('<option value="">Use Active Connection Profile</option>');
+    for (const item of profiles) {
+        connectionSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
+    }
+    connectionSelect.val(profile?.llmConnectionProfile || '');
+
+    presetSelect.empty().append('<option value="">Use Active Chat Completion Preset</option>');
+    for (const item of presets) {
+        presetSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
+    }
+    presetSelect.val(profile?.llmPreset || '');
+}
+
+async function generateQuietPromptWithEvaluatorModel(ctx, profile, quietPrompt) {
+    const payload = {
+        quietPrompt,
+        connectionProfile: profile?.llmConnectionProfile || undefined,
+        connection_profile: profile?.llmConnectionProfile || undefined,
+        chatCompletionPreset: profile?.llmPreset || undefined,
+        chat_completion_preset: profile?.llmPreset || undefined,
+        preset: profile?.llmPreset || undefined
+    };
+
+    Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
+    return ctx.generateQuietPrompt(payload);
+}
+
 
 function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
     const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
@@ -976,7 +1079,7 @@ async function evaluateIntentModelOrFallback(ctx, prompt, profile, recentChatTex
     }
 
     try {
-        const result = await ctx.generateQuietPrompt({ quietPrompt: prompt });
+        const result = await generateQuietPromptWithEvaluatorModel(ctx, profile, prompt);
         const parsed = parseJsonObject(result);
         if (!parsed) {
             return null;
@@ -1076,9 +1179,9 @@ function evaluateIntentLocally(profile, recentChatText) {
     const completionVerbSignals = [
         'done', 'completed', 'finished', 'resolved', 'handled', 'achieved', 'accomplished', 'wrapped up', 'took care of'
     ];
-    const progressSignals = [
-        'we did', 'we have', 'we got', 'we learned', 'we found', 'we established', 'we covered', 'we confirmed',
-        'i did', 'i have', 'i got', 'i learned', 'i found', 'i established', 'i covered', 'i confirmed'
+    const objectiveActionSignals = [
+        'introduced', 'explained', 'revealed', 'established', 'discussed', 'learned', 'discovered',
+        'confirmed', 'decided', 'resolved', 'confronted', 'admitted', 'bonded', 'opened up'
     ];
     const userWordSet = new Set((userLinesLower.match(/[a-z0-9']+/g) || []).filter(Boolean));
 
@@ -1098,17 +1201,17 @@ function evaluateIntentLocally(profile, recentChatText) {
         const overlapRatio = matchedWords.length / objectiveWords.length;
         const stemOverlapRatio = matchedStems.length / objectiveWords.length;
         const hasCompletionVerb = completionVerbSignals.some(signal => userLinesLower.includes(signal));
-        const hasProgressSignal = progressSignals.some(signal => userLinesLower.includes(signal));
+        const hasObjectiveActionSignal = objectiveActionSignals.some(signal => userLinesLower.includes(signal));
 
-        if (overlapRatio >= 0.28 || stemOverlapRatio >= 0.4 || (matchedWords.length >= 2 && overlapRatio >= 0.2)) {
+        if ((overlapRatio >= 0.55 || stemOverlapRatio >= 0.6) && matchedWords.length >= 2) {
             return true;
         }
 
-        if (hasCompletionVerb && (matchedWords.length >= 1 || matchedStems.length >= 2)) {
+        if (hasCompletionVerb && (matchedWords.length >= 2 || matchedStems.length >= 3)) {
             return true;
         }
 
-        return hasProgressSignal && (matchedWords.length >= 1 || matchedStems.length >= 2);
+        return hasObjectiveActionSignal && (matchedWords.length >= 2 || matchedStems.length >= 3);
     };
 
     const objectiveCompletion = objectives.map(objective => {
@@ -1256,6 +1359,7 @@ function profileToForm(profile) {
     $('#aspect_destinia_threshold').val(profile.transitionThreshold ?? 0.72);
     $('#aspect_destinia_objective_threshold').val(getObjectiveCompletionThreshold(profile));
     $('#aspect_destinia_window').val(profile.intentWindow ?? 8);
+    renderEvaluatorModelOptions(profile);
     $('#aspect_destinia_chat_select').val(profile.attachedChatKey || '');
     $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
 
@@ -1287,6 +1391,8 @@ function clearForm() {
     $('#aspect_destinia_threshold').val(0.72);
     $('#aspect_destinia_objective_threshold').val(0.8);
     $('#aspect_destinia_window').val(8);
+    $('#aspect_destinia_eval_connection').val('');
+    $('#aspect_destinia_eval_preset').val('');
     $('#aspect_destinia_chat_select').val('');
     $('#aspect_destinia_timeline').val(JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
 }
@@ -1308,6 +1414,8 @@ function formToProfile(profile) {
     profile.transitionThreshold = Number($('#aspect_destinia_threshold').val() || 0.72);
     profile.objectiveAutoAdvanceThreshold = clamp01(Number($('#aspect_destinia_objective_threshold').val() || 0.8));
     profile.intentWindow = Number($('#aspect_destinia_window').val() || 8);
+    profile.llmConnectionProfile = $('#aspect_destinia_eval_connection').val() || '';
+    profile.llmPreset = $('#aspect_destinia_eval_preset').val() || '';
 
     const selectedChatKey = $('#aspect_destinia_chat_select').val() || '';
     const knownChat = ensureSettings().knownChats.find(x => x.key === selectedChatKey);
@@ -1742,6 +1850,14 @@ function buildSettingsHtml() {
                                 <label class="aspect-destinia-label">Recent Messages Window (Evaluator Context)</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Evaluator Connection Profile</label>
+                                <select id="aspect_destinia_eval_connection"></select>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
+                                <select id="aspect_destinia_eval_preset"></select>
+                            </div>
                         </div>
 
                         <div class="aspect-destinia-grid three sliders">
@@ -1764,7 +1880,6 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
                             <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
                             <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
                             <button id="aspect_destinia_reset_beat" class="menu_button">First Plot Point</button>
@@ -1781,6 +1896,7 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-section-title">Timeline JSON</div>
                         <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
                             <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
