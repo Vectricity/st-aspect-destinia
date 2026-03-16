@@ -725,7 +725,6 @@ function setLatestObjectiveEvaluationReport(report) {
         ? {
             parsed: report.parsed,
             issues: Array.isArray(report.issues) ? report.issues : [],
-            source: report.source || 'heuristic',
             timelineSnapshot: $('#aspect_destinia_timeline').val() || ''
         }
         : null;
@@ -741,7 +740,6 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
     const issues = [];
     const profile = getDisplayedProfile() || getActiveProfile();
     let llmEvaluations = [];
-    let evaluationSource = 'heuristic';
     if (profile) {
         try {
             const ctx = getCtx();
@@ -752,14 +750,13 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
             const parsedResult = parseJsonObject(result);
             if (Array.isArray(parsedResult?.evaluations)) {
                 llmEvaluations = parsedResult.evaluations;
-                evaluationSource = 'llm';
             }
         } catch (err) {
             console.warn(`[${MODULE_NAME}] objective evaluator model failed; using heuristic fallback`, err);
         }
     }
 
-    if (evaluationSource === 'llm') {
+    if (llmEvaluations.length) {
         for (const row of llmEvaluations) {
             const pointIdx = Number(row?.point_index);
             const objectiveIdx = Number(row?.objective_index);
@@ -803,7 +800,7 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
         });
     }
 
-    const report = { parsed, issues, source: evaluationSource };
+    const report = { parsed, issues };
     setLatestObjectiveEvaluationReport(report);
 
     if (!issues.length) {
@@ -813,8 +810,7 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
         return report;
     }
 
-    const evalMethod = evaluationSource === 'llm' ? 'LLM evaluator' : 'heuristic fallback';
-    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s) via ${evalMethod}. Open View Report to review details.`);
+    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s). Open 📋 to review details.`);
     return report;
 }
 
@@ -856,11 +852,6 @@ function getLatestObjectiveEvaluationReport() {
     }
 
     return latestObjectiveEvaluationReport;
-}
-
-function removeFixedIssueFromLatestReport(reportIndex) {
-    if (!latestObjectiveEvaluationReport || !Array.isArray(latestObjectiveEvaluationReport.issues)) return;
-    latestObjectiveEvaluationReport.issues.splice(reportIndex, 1);
 }
 
 async function fixSingleIssueFromReport(issue, parsed, profile) {
@@ -936,8 +927,8 @@ async function fixSingleObjectiveFromReportIndex(reportIndex) {
     }
 
     $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
-    removeFixedIssueFromLatestReport(reportIndex);
-    renderObjectiveEvaluationReportModal();
+    setLatestObjectiveEvaluationReport(null);
+    closeObjectiveReportModal();
     toastr.success(`${MODULE_NAME}: fixed 1 objective from the latest report.`);
 }
 
@@ -2199,7 +2190,7 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
                             <button id="aspect_destinia_fix_objectives" class="menu_button">Fix Objectives</button>
-                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">View Report</button>
+                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">📋</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
