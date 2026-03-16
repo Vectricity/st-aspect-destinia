@@ -2,9 +2,9 @@ const MODULE_ID = 'st-aspect-destinia';
 const MODULE_NAME = 'Aspect: Destinia';
 const ROOT_ID = 'aspect_destinia_root';
 const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
-// Default to local evaluation to avoid backend tool-calling failures
-// (e.g. "DEGRADED function cannot be invoked") surfacing to end users.
-let remoteIntentEvalDisabled = true;
+// Prefer evaluator-model checks first; only fall back to local heuristics when backend limitations occur.
+let remoteIntentEvalDisabled = false;
+let latestObjectiveEvaluationReport = null;
 
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
@@ -184,6 +184,46 @@ const DEFAULT_PROFILE = Object.freeze({
                 '{{recent_user_chat}}',
                 'Recent chat:',
                 '{{recent_chat}}'
+            ].join('\n'),
+
+        objectiveTemplateEvaluatorPrompt:
+            [
+                'You are reviewing story-beat objectives for quality and actionability.',
+                'Evaluate each objective and decide whether it is problematic for practical in-scene tracking.',
+                'Mark problematic when an objective is vague, too broad, overloaded with multiple actions, or not directly observable.',
+                'For problematic objectives, include 1-3 rewritten objective lines that are concrete and measurable in scene play.',
+                'Return ONLY valid JSON with this schema:',
+                '{',
+                '  "evaluations": [',
+                '    {',
+                '      "point_index": 0,',
+                '      "objective_index": 0,',
+                '      "is_problem": true,',
+                '      "issues": ["vague", "complicated"],',
+                '      "reason": "short reason",',
+                '      "suggested_rewrites": ["objective line"]',
+                '    }',
+                '  ]',
+                '}',
+                'Allowed issue labels: vague, complicated, generalized, not_observable.',
+                'If objective is good, set is_problem to false and suggested_rewrites to [].',
+                'Timeline JSON:',
+                '{{timeline_json}}'
+            ].join('\n'),
+
+        objectiveTemplateFixerPrompt:
+            [
+                'Rewrite the objective below into concrete, observable beat objectives.',
+                'Return ONLY valid JSON:',
+                '{ "rewrites": ["objective 1", "objective 2"] }',
+                'Rules:',
+                '- Keep story intent aligned with beat title and beat summary.',
+                '- Prefer one clear action per objective line.',
+                '- 1 to 3 rewrites only.',
+                '- Avoid vague terms like "improve", "handle", or "progress" without specifics.',
+                'Beat title: {{beat_title}}',
+                'Beat summary: {{beat_summary}}',
+                'Original objective: {{objective_text}}'
             ].join('\n')
     }
 });
@@ -623,7 +663,74 @@ async function generateQuietPromptWithEvaluatorModel(ctx, profile, quietPrompt) 
 }
 
 
-function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
+function normalizeObjectiveEvaluationIssueLabels(issues) {
+    if (!Array.isArray(issues)) return [];
+    return issues
+        .map(issue => String(issue || '').trim().toLowerCase())
+        .filter(Boolean)
+        .map(type => ({ type, message: `Flagged by evaluator: ${type}` }));
+}
+
+function closeObjectiveReportModal() {
+    $('#aspect_destinia_objective_report_modal').removeClass('open');
+}
+
+function renderObjectiveEvaluationReportModal() {
+    const modal = $('#aspect_destinia_objective_report_modal');
+    const body = $('#aspect_destinia_objective_report_body');
+    if (!modal.length || !body.length) return;
+
+    const report = latestObjectiveEvaluationReport;
+    if (!report) {
+        body.html('<div class="aspect-destinia-objective-report-empty">No evaluation report yet. Run Evaluate Objectives first.</div>');
+        return;
+    }
+
+    if (!report.issues.length) {
+        body.html('<div class="aspect-destinia-objective-report-empty">No objective issues were found in the latest evaluation.</div>');
+        return;
+    }
+
+    const rows = report.issues.map((issue, reportIndex) => {
+        const issueLabels = issue.issues?.length
+            ? issue.issues.map(item => escapeHtml(item.type || item.message || 'issue')).join(', ')
+            : 'unspecified';
+        const reason = issue.reason ? `<div class="aspect-destinia-objective-report-reason">${escapeHtml(issue.reason)}</div>` : '';
+        return `
+            <div class="aspect-destinia-objective-report-item">
+                <div class="aspect-destinia-objective-report-item-head">
+                    <div>
+                        <strong>${escapeHtml(issue.beatTitle)}</strong>
+                        <div class="aspect-destinia-objective-report-meta">Objective #${issue.objectiveIdx + 1}</div>
+                    </div>
+                    <button class="menu_button aspect-destinia-icon-action" data-report-index="${reportIndex}" title="Fix this objective">🔧</button>
+                </div>
+                <div class="aspect-destinia-objective-report-objective">${escapeHtml(issue.objectiveText)}</div>
+                <div class="aspect-destinia-objective-report-meta">Issues: ${issueLabels}</div>
+                ${reason}
+            </div>
+        `;
+    }).join('');
+
+    body.html(rows);
+}
+
+function openObjectiveEvaluationReportModal() {
+    renderObjectiveEvaluationReportModal();
+    $('#aspect_destinia_objective_report_modal').addClass('open');
+}
+
+function setLatestObjectiveEvaluationReport(report) {
+    latestObjectiveEvaluationReport = report
+        ? {
+            parsed: report.parsed,
+            issues: Array.isArray(report.issues) ? report.issues : [],
+            timelineSnapshot: $('#aspect_destinia_timeline').val() || ''
+        }
+        : null;
+}
+
+async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
     const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
     if (!parsed) {
         toastr.error(`${MODULE_NAME}: cannot evaluate objectives because timeline JSON is invalid.`);
@@ -631,71 +738,198 @@ function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
     }
 
     const issues = [];
-    parsed.plotPoints.forEach((point, pointIdx) => {
-        const objectives = Array.isArray(point.objectives) ? point.objectives.map(normalizeObjectiveItem) : [];
-        objectives.forEach((objective, objectiveIdx) => {
-            const objectiveIssues = classifyObjectiveIssues(objective.text);
-            if (objectiveIssues.length) {
+    const profile = getDisplayedProfile() || getActiveProfile();
+    let llmEvaluations = [];
+    if (profile) {
+        try {
+            const ctx = getCtx();
+            const prompt = replaceMacros(profile.prompts?.objectiveTemplateEvaluatorPrompt || '', {
+                timeline_json: JSON.stringify(parsed, null, 2)
+            });
+            const result = await generateQuietPromptWithEvaluatorModel(ctx, profile, prompt);
+            const parsedResult = parseJsonObject(result);
+            if (Array.isArray(parsedResult?.evaluations)) {
+                llmEvaluations = parsedResult.evaluations;
+            }
+        } catch (err) {
+            console.warn(`[${MODULE_NAME}] objective evaluator model failed; using heuristic fallback`, err);
+        }
+    }
+
+    if (llmEvaluations.length) {
+        for (const row of llmEvaluations) {
+            const pointIdx = Number(row?.point_index);
+            const objectiveIdx = Number(row?.objective_index);
+            if (!Number.isInteger(pointIdx) || !Number.isInteger(objectiveIdx)) continue;
+
+            const point = parsed.plotPoints?.[pointIdx];
+            const objective = normalizeObjectiveItem(point?.objectives?.[objectiveIdx]);
+            if (!point || !objective.text) continue;
+
+            if (parseBooleanLike(row?.is_problem, false)) {
                 issues.push({
                     pointIdx,
                     objectiveIdx,
                     beatTitle: point.title || `Beat ${pointIdx + 1}`,
                     objectiveText: objective.text || '(empty objective)',
-                    issues: objectiveIssues
+                    issues: normalizeObjectiveEvaluationIssueLabels(row?.issues),
+                    reason: String(row?.reason || '').trim(),
+                    suggestedRewrites: Array.isArray(row?.suggested_rewrites)
+                        ? row.suggested_rewrites.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
+                        : []
                 });
             }
+        }
+    } else {
+        parsed.plotPoints.forEach((point, pointIdx) => {
+            const objectives = Array.isArray(point.objectives) ? point.objectives.map(normalizeObjectiveItem) : [];
+            objectives.forEach((objective, objectiveIdx) => {
+                const objectiveIssues = classifyObjectiveIssues(objective.text);
+                if (objectiveIssues.length) {
+                    issues.push({
+                        pointIdx,
+                        objectiveIdx,
+                        beatTitle: point.title || `Beat ${pointIdx + 1}`,
+                        objectiveText: objective.text || '(empty objective)',
+                        issues: objectiveIssues,
+                        reason: 'Heuristic fallback evaluation.',
+                        suggestedRewrites: []
+                    });
+                }
+            });
         });
-    });
+    }
+
+    const report = { parsed, issues };
+    setLatestObjectiveEvaluationReport(report);
 
     if (!issues.length) {
         if (notifyWhenHealthy) {
             toastr.success(`${MODULE_NAME}: no vague or overly complicated objectives detected.`);
         }
-        return { parsed, issues };
+        return report;
     }
 
-    const summary = issues
-        .slice(0, 5)
-        .map(issue => `${issue.beatTitle}: ${issue.objectiveText}`)
-        .join(' | ');
-    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s). ${summary}`);
-    return { parsed, issues };
+    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s). Open 📋 to review details.`);
+    return report;
 }
 
-function fixTemplateObjectivesFromInput() {
-    const result = evaluateTemplateObjectivesFromInput(false);
-    if (!result) return;
+async function buildObjectiveFixesWithModel(profile, beat, objectiveText, seedSuggestions = []) {
+    if (seedSuggestions.length) {
+        return seedSuggestions.slice(0, 3);
+    }
 
-    const { parsed, issues } = result;
-    if (!issues.length) {
+    try {
+        const ctx = getCtx();
+        const prompt = replaceMacros(profile.prompts?.objectiveTemplateFixerPrompt || '', {
+            beat_title: beat?.title || '',
+            beat_summary: beat?.summary || '',
+            objective_text: objectiveText || ''
+        });
+        const result = await generateQuietPromptWithEvaluatorModel(ctx, profile, prompt);
+        const parsed = parseJsonObject(result);
+        if (Array.isArray(parsed?.rewrites)) {
+            const rewrites = parsed.rewrites.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3);
+            if (rewrites.length) return rewrites;
+        }
+    } catch (err) {
+        console.warn(`[${MODULE_NAME}] objective fixer model failed; using heuristic fallback`, err);
+    }
+
+    return buildObjectiveFixes(objectiveText);
+}
+
+function getLatestObjectiveEvaluationReport() {
+    if (!latestObjectiveEvaluationReport) {
+        toastr.warning(`${MODULE_NAME}: run Evaluate Objectives first to create a report.`);
+        return null;
+    }
+
+    const currentTimeline = $('#aspect_destinia_timeline').val() || '';
+    if (latestObjectiveEvaluationReport.timelineSnapshot !== currentTimeline) {
+        toastr.warning(`${MODULE_NAME}: timeline changed since evaluation. Re-run Evaluate Objectives first.`);
+        return null;
+    }
+
+    return latestObjectiveEvaluationReport;
+}
+
+async function fixSingleIssueFromReport(issue, parsed, profile) {
+    const point = parsed.plotPoints?.[issue.pointIdx];
+    if (!point || !Array.isArray(point.objectives)) return false;
+
+    const original = normalizeObjectiveItem(point.objectives[issue.objectiveIdx]);
+    if (!original.text) return false;
+
+    const fixes = profile
+        ? await buildObjectiveFixesWithModel(profile, point, original.text, issue.suggestedRewrites || [])
+        : buildObjectiveFixes(original.text);
+    if (!fixes.length) return false;
+
+    const fixedEntries = fixes.map(text => ({ text, completed: false }));
+    point.objectives.splice(issue.objectiveIdx, 1, ...fixedEntries);
+    return true;
+}
+
+async function fixTemplateObjectivesFromInput() {
+    const report = getLatestObjectiveEvaluationReport();
+    if (!report) return;
+
+    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
+    if (!parsed) {
+        toastr.error(`${MODULE_NAME}: cannot fix objectives because timeline JSON is invalid.`);
+        return;
+    }
+
+    if (!report.issues.length) {
         toastr.success(`${MODULE_NAME}: no objective fixes needed.`);
         return;
     }
 
+    const sortedIssues = [...report.issues].sort((a, b) => {
+        if (a.pointIdx !== b.pointIdx) return b.pointIdx - a.pointIdx;
+        return b.objectiveIdx - a.objectiveIdx;
+    });
+
     let replacements = 0;
-    const issuesByBeat = new Map();
-    for (const issue of issues) {
-        if (!issuesByBeat.has(issue.pointIdx)) issuesByBeat.set(issue.pointIdx, []);
-        issuesByBeat.get(issue.pointIdx).push(issue);
-    }
-
-    for (const [pointIdx, beatIssues] of issuesByBeat.entries()) {
-        const point = parsed.plotPoints[pointIdx];
-        if (!point || !Array.isArray(point.objectives)) continue;
-
-        beatIssues
-            .sort((a, b) => b.objectiveIdx - a.objectiveIdx)
-            .forEach((issue) => {
-                const original = normalizeObjectiveItem(point.objectives[issue.objectiveIdx]);
-                const fixes = buildObjectiveFixes(original.text);
-                const fixedEntries = fixes.map(text => ({ text, completed: false }));
-                point.objectives.splice(issue.objectiveIdx, 1, ...fixedEntries);
-                replacements += 1;
-            });
+    const profile = getDisplayedProfile() || getActiveProfile();
+    for (const issue of sortedIssues) {
+        const applied = await fixSingleIssueFromReport(issue, parsed, profile);
+        if (applied) replacements += 1;
     }
 
     $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
-    toastr.success(`${MODULE_NAME}: fixed ${replacements} objective(s). Review and save the updated template.`);
+    setLatestObjectiveEvaluationReport(null);
+    toastr.success(`${MODULE_NAME}: fixed ${replacements} objective(s) from the latest report.`);
+}
+
+async function fixSingleObjectiveFromReportIndex(reportIndex) {
+    const report = getLatestObjectiveEvaluationReport();
+    if (!report) return;
+
+    const issue = report.issues[reportIndex];
+    if (!issue) {
+        toastr.warning(`${MODULE_NAME}: selected report item is no longer available.`);
+        return;
+    }
+
+    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
+    if (!parsed) {
+        toastr.error(`${MODULE_NAME}: cannot fix objective because timeline JSON is invalid.`);
+        return;
+    }
+
+    const profile = getDisplayedProfile() || getActiveProfile();
+    const applied = await fixSingleIssueFromReport(issue, parsed, profile);
+    if (!applied) {
+        toastr.warning(`${MODULE_NAME}: unable to fix the selected objective.`);
+        return;
+    }
+
+    $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
+    setLatestObjectiveEvaluationReport(null);
+    closeObjectiveReportModal();
+    toastr.success(`${MODULE_NAME}: fixed 1 objective from the latest report.`);
 }
 
 function formatObjectives(items) {
@@ -1424,6 +1658,8 @@ function profileToForm(profile) {
     $('#aspect_destinia_prompt_pacing').val(profile.prompts.pacingInstruction || '');
     $('#aspect_destinia_prompt_objective_guidance').val(profile.prompts.objectiveCompletionGuidance || '');
     $('#aspect_destinia_prompt_evaluator').val(profile.prompts.evaluatorPrompt || '');
+    $('#aspect_destinia_prompt_objective_template_evaluator').val(profile.prompts.objectiveTemplateEvaluatorPrompt || '');
+    $('#aspect_destinia_prompt_objective_template_fixer').val(profile.prompts.objectiveTemplateFixerPrompt || '');
 
     renderStatus(profile);
 }
@@ -1486,6 +1722,8 @@ function formToProfile(profile) {
     profile.prompts.pacingInstruction = $('#aspect_destinia_prompt_pacing').val();
     profile.prompts.objectiveCompletionGuidance = $('#aspect_destinia_prompt_objective_guidance').val();
     profile.prompts.evaluatorPrompt = $('#aspect_destinia_prompt_evaluator').val();
+    profile.prompts.objectiveTemplateEvaluatorPrompt = $('#aspect_destinia_prompt_objective_template_evaluator').val();
+    profile.prompts.objectiveTemplateFixerPrompt = $('#aspect_destinia_prompt_objective_template_fixer').val();
 
     const totalBeats = profile.timeline.plotPoints.length;
     if (profile.state.currentIndex >= totalBeats) {
@@ -1612,6 +1850,8 @@ const FIELD_DEFAULTS = {
     aspect_destinia_prompt_pacing: () => DEFAULT_PROFILE.prompts.pacingInstruction,
     aspect_destinia_prompt_objective_guidance: () => DEFAULT_PROFILE.prompts.objectiveCompletionGuidance,
     aspect_destinia_prompt_evaluator: () => DEFAULT_PROFILE.prompts.evaluatorPrompt,
+    aspect_destinia_prompt_objective_template_evaluator: () => DEFAULT_PROFILE.prompts.objectiveTemplateEvaluatorPrompt,
+    aspect_destinia_prompt_objective_template_fixer: () => DEFAULT_PROFILE.prompts.objectiveTemplateFixerPrompt,
 };
 
 function resetFieldToDefault(fieldId) {
@@ -1950,6 +2190,7 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
                             <button id="aspect_destinia_fix_objectives" class="menu_button">Fix Objectives</button>
+                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">📋</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -2019,9 +2260,29 @@ function buildSettingsHtml() {
                             <label class="aspect-destinia-label">Evaluator Prompt</label>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
                         </div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Objective Template Evaluator Prompt</label>
+                            <textarea id="aspect_destinia_prompt_objective_template_evaluator" class="aspect-destinia-code tall"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Objective Template Fixer Prompt</label>
+                            <textarea id="aspect_destinia_prompt_objective_template_fixer" class="aspect-destinia-code"></textarea>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="aspect_destinia_objective_report_modal" class="aspect-destinia-objective-report-modal" aria-hidden="true">
+        <div class="aspect-destinia-objective-report-dialog">
+            <div class="aspect-destinia-objective-report-header">
+                <div class="aspect-destinia-section-title">Objective Evaluation Report</div>
+                <button id="aspect_destinia_close_objective_report" class="menu_button" title="Close report">✕</button>
+            </div>
+            <div id="aspect_destinia_objective_report_body" class="aspect-destinia-objective-report-body"></div>
         </div>
     </div>`;
 }
@@ -2055,12 +2316,26 @@ function bindUI() {
         }
     });
 
-    $('#aspect_destinia_eval_objectives').on('click', () => {
-        evaluateTemplateObjectivesFromInput(true);
+    $('#aspect_destinia_eval_objectives').on('click', async () => {
+        await evaluateTemplateObjectivesFromInput(true);
     });
 
-    $('#aspect_destinia_fix_objectives').on('click', () => {
-        fixTemplateObjectivesFromInput();
+    $('#aspect_destinia_fix_objectives').on('click', async () => {
+        await fixTemplateObjectivesFromInput();
+    });
+
+    $('#aspect_destinia_open_objective_report').on('click', () => {
+        openObjectiveEvaluationReportModal();
+    });
+
+    $('#aspect_destinia_close_objective_report').on('click', () => {
+        closeObjectiveReportModal();
+    });
+
+    $('#aspect_destinia_objective_report_body').on('click', '.aspect-destinia-icon-action', async function () {
+        const reportIndex = Number($(this).data('reportIndex'));
+        if (!Number.isInteger(reportIndex)) return;
+        await fixSingleObjectiveFromReportIndex(reportIndex);
     });
 
     $('#aspect_destinia_prev').on('click', () => stepBeat(-1));
