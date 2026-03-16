@@ -5,8 +5,6 @@ const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
 // Prefer evaluator-model checks first; only fall back to local heuristics when backend limitations occur.
 let remoteIntentEvalDisabled = false;
 let latestObjectiveEvaluationReport = null;
-let uiBusyCounter = 0;
-
 
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
@@ -673,78 +671,8 @@ function normalizeObjectiveEvaluationIssueLabels(issues) {
         .map(type => ({ type, message: `Flagged by evaluator: ${type}` }));
 }
 
-function ensureBusyIndicator() {
-    if (document.getElementById('aspect_destinia_busy_indicator')) return;
-    document.body.insertAdjacentHTML('beforeend', `
-        <div id="aspect_destinia_busy_indicator" class="aspect-destinia-busy-indicator" aria-hidden="true">
-            <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
-            <span>Processing…</span>
-        </div>
-    `);
-}
-
-function setBusyIndicatorVisible(visible) {
-    ensureBusyIndicator();
-    const el = document.getElementById('aspect_destinia_busy_indicator');
-    if (!el) return;
-    el.classList.toggle('open', Boolean(visible));
-    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
-}
-
-async function withBusyIndicator(task) {
-    uiBusyCounter += 1;
-    setBusyIndicatorVisible(true);
-    try {
-        return await task();
-    } finally {
-        uiBusyCounter = Math.max(0, uiBusyCounter - 1);
-        if (uiBusyCounter === 0) {
-            setBusyIndicatorVisible(false);
-        }
-    }
-}
-
-function bindDebouncedButtonAction(selector, handler, options = {}) {
-    const debounceMs = Number(options.debounceMs ?? 220);
-    const showBusy = options.showBusy !== false;
-    const element = $(selector);
-    if (!element.length) return;
-
-    let debounceTimer = null;
-    let running = false;
-
-    element.on('click', function (event) {
-        event.preventDefault();
-        if (running) return;
-
-        if (debounceTimer) {
-            clearTimeout(debounceTimer);
-        }
-
-        const button = this;
-        debounceTimer = setTimeout(async () => {
-            debounceTimer = null;
-            running = true;
-            const $button = $(button);
-            $button.prop('disabled', true).addClass('aspect-destinia-busy-button');
-
-            try {
-                const run = () => Promise.resolve(handler.call(button));
-                if (showBusy) {
-                    await withBusyIndicator(run);
-                } else {
-                    await run();
-                }
-            } finally {
-                running = false;
-                $button.prop('disabled', false).removeClass('aspect-destinia-busy-button');
-            }
-        }, debounceMs);
-    });
-}
-
 function closeObjectiveReportModal() {
-    $('#aspect_destinia_objective_report_modal').removeClass('open').attr('aria-hidden', 'true');
+    $('#aspect_destinia_objective_report_modal').removeClass('open');
 }
 
 function renderObjectiveEvaluationReportModal() {
@@ -789,7 +717,7 @@ function renderObjectiveEvaluationReportModal() {
 
 function openObjectiveEvaluationReportModal() {
     renderObjectiveEvaluationReportModal();
-    $('#aspect_destinia_objective_report_modal').addClass('open').attr('aria-hidden', 'false');
+    $('#aspect_destinia_objective_report_modal').addClass('open');
 }
 
 function setLatestObjectiveEvaluationReport(report) {
@@ -797,7 +725,6 @@ function setLatestObjectiveEvaluationReport(report) {
         ? {
             parsed: report.parsed,
             issues: Array.isArray(report.issues) ? report.issues : [],
-            source: report.source || 'heuristic',
             timelineSnapshot: $('#aspect_destinia_timeline').val() || ''
         }
         : null;
@@ -813,7 +740,6 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
     const issues = [];
     const profile = getDisplayedProfile() || getActiveProfile();
     let llmEvaluations = [];
-    let evaluationSource = 'heuristic';
     if (profile) {
         try {
             const ctx = getCtx();
@@ -824,14 +750,13 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
             const parsedResult = parseJsonObject(result);
             if (Array.isArray(parsedResult?.evaluations)) {
                 llmEvaluations = parsedResult.evaluations;
-                evaluationSource = 'llm';
             }
         } catch (err) {
             console.warn(`[${MODULE_NAME}] objective evaluator model failed; using heuristic fallback`, err);
         }
     }
 
-    if (evaluationSource === 'llm') {
+    if (llmEvaluations.length) {
         for (const row of llmEvaluations) {
             const pointIdx = Number(row?.point_index);
             const objectiveIdx = Number(row?.objective_index);
@@ -875,7 +800,7 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
         });
     }
 
-    const report = { parsed, issues, source: evaluationSource };
+    const report = { parsed, issues };
     setLatestObjectiveEvaluationReport(report);
 
     if (!issues.length) {
@@ -885,8 +810,7 @@ async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
         return report;
     }
 
-    const evalMethod = evaluationSource === 'llm' ? 'LLM evaluator' : 'heuristic fallback';
-    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s) via ${evalMethod}. Open View Report to review details.`);
+    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s). Open 📋 to review details.`);
     return report;
 }
 
@@ -928,11 +852,6 @@ function getLatestObjectiveEvaluationReport() {
     }
 
     return latestObjectiveEvaluationReport;
-}
-
-function removeFixedIssueFromLatestReport(reportIndex) {
-    if (!latestObjectiveEvaluationReport || !Array.isArray(latestObjectiveEvaluationReport.issues)) return;
-    latestObjectiveEvaluationReport.issues.splice(reportIndex, 1);
 }
 
 async function fixSingleIssueFromReport(issue, parsed, profile) {
@@ -1008,8 +927,8 @@ async function fixSingleObjectiveFromReportIndex(reportIndex) {
     }
 
     $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
-    removeFixedIssueFromLatestReport(reportIndex);
-    renderObjectiveEvaluationReportModal();
+    setLatestObjectiveEvaluationReport(null);
+    closeObjectiveReportModal();
     toastr.success(`${MODULE_NAME}: fixed 1 objective from the latest report.`);
 }
 
@@ -2271,7 +2190,7 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
                             <button id="aspect_destinia_fix_objectives" class="menu_button">Fix Objectives</button>
-                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">View Report</button>
+                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">📋</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -2376,74 +2295,64 @@ function bindUI() {
         profileToForm(profile);
     });
 
-    bindDebouncedButtonAction('#aspect_destinia_create', createProfileAttachedToCurrentChat);
-    bindDebouncedButtonAction('#aspect_destinia_duplicate', duplicateSelectedProfile);
-    bindDebouncedButtonAction('#aspect_destinia_delete', deleteSelectedProfile);
-    bindDebouncedButtonAction('#aspect_destinia_attach_current', attachSelectedProfileToCurrentChat);
-    bindDebouncedButtonAction('#aspect_destinia_save', saveDisplayedProfile);
-    bindDebouncedButtonAction('#aspect_destinia_export', exportDisplayedProfileToFile);
-    bindDebouncedButtonAction('#aspect_destinia_import', () => $('#aspect_destinia_import_file').trigger('click'), { showBusy: false });
+    $('#aspect_destinia_create').on('click', createProfileAttachedToCurrentChat);
+    $('#aspect_destinia_duplicate').on('click', duplicateSelectedProfile);
+    $('#aspect_destinia_delete').on('click', deleteSelectedProfile);
+    $('#aspect_destinia_attach_current').on('click', attachSelectedProfileToCurrentChat);
+    $('#aspect_destinia_save').on('click', saveDisplayedProfile);
+    $('#aspect_destinia_export').on('click', exportDisplayedProfileToFile);
+    $('#aspect_destinia_import').on('click', () => $('#aspect_destinia_import_file').trigger('click'));
     $('#aspect_destinia_import_file').on('change', importProfileFromFile);
-
-    bindDebouncedButtonAction('#aspect_destinia_timeline_export', exportTimelineToFile);
-    bindDebouncedButtonAction('#aspect_destinia_timeline_import', () => $('#aspect_destinia_timeline_import_file').trigger('click'), { showBusy: false });
+    $('#aspect_destinia_timeline_export').on('click', exportTimelineToFile);
+    $('#aspect_destinia_timeline_import').on('click', () => $('#aspect_destinia_timeline_import_file').trigger('click'));
     $('#aspect_destinia_timeline_import_file').on('change', importTimelineFromFile);
 
-    bindDebouncedButtonAction('#aspect_destinia_validate', () => {
+    $('#aspect_destinia_validate').on('click', () => {
         const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
         if (parsed) {
             toastr.success(`${MODULE_NAME}: timeline JSON is valid.`);
         } else {
             toastr.error(`${MODULE_NAME}: invalid timeline JSON.`);
         }
-    }, { showBusy: false });
+    });
 
-    bindDebouncedButtonAction('#aspect_destinia_eval_objectives', () => evaluateTemplateObjectivesFromInput(true));
-    bindDebouncedButtonAction('#aspect_destinia_fix_objectives', () => fixTemplateObjectivesFromInput());
-    bindDebouncedButtonAction('#aspect_destinia_open_objective_report', () => openObjectiveEvaluationReportModal(), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_close_objective_report', () => closeObjectiveReportModal(), { showBusy: false, debounceMs: 80 });
+    $('#aspect_destinia_eval_objectives').on('click', async () => {
+        await evaluateTemplateObjectivesFromInput(true);
+    });
 
-    $('#aspect_destinia_objective_report_modal').on('click', function (event) {
-        if (event.target === this) {
-            closeObjectiveReportModal();
-        }
+    $('#aspect_destinia_fix_objectives').on('click', async () => {
+        await fixTemplateObjectivesFromInput();
+    });
+
+    $('#aspect_destinia_open_objective_report').on('click', () => {
+        openObjectiveEvaluationReportModal();
+    });
+
+    $('#aspect_destinia_close_objective_report').on('click', () => {
+        closeObjectiveReportModal();
     });
 
     $('#aspect_destinia_objective_report_body').on('click', '.aspect-destinia-icon-action', async function () {
         const reportIndex = Number($(this).data('reportIndex'));
         if (!Number.isInteger(reportIndex)) return;
-        if ($(this).data('busy')) return;
-
-        $(this).data('busy', true).prop('disabled', true);
-        try {
-            await withBusyIndicator(() => fixSingleObjectiveFromReportIndex(reportIndex));
-        } finally {
-            $(this).data('busy', false).prop('disabled', false);
-        }
+        await fixSingleObjectiveFromReportIndex(reportIndex);
     });
 
-    bindDebouncedButtonAction('#aspect_destinia_prev', () => stepBeat(-1), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_next', () => stepBeat(1), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_reset_beat', resetCurrentBeatToFirst, { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_clear_chat', clearCurrentChatMessages);
+    $('#aspect_destinia_prev').on('click', () => stepBeat(-1));
+    $('#aspect_destinia_next').on('click', () => stepBeat(1));
+    $('#aspect_destinia_reset_beat').on('click', resetCurrentBeatToFirst);
+    $('#aspect_destinia_clear_chat').on('click', clearCurrentChatMessages);
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
 
     addFieldResetButtons();
-}
 
+}
 
 
 function renderRoot() {
     if (document.getElementById(ROOT_ID)) return;
     $('#extensions_settings').append(buildSettingsHtml());
-
-    const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (modal && modal.parentElement !== document.body) {
-        document.body.appendChild(modal);
-    }
-
-    ensureBusyIndicator();
     bindUI();
     refreshUI();
 }
