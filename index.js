@@ -830,7 +830,15 @@ function renderObjectiveEvaluationReportModal() {
     body.html(rows);
 }
 
+function ensureObjectiveReportModalHost() {
+    const modal = document.getElementById('aspect_destinia_objective_report_modal');
+    if (modal && modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
+    }
+}
+
 function openObjectiveEvaluationReportModal() {
+    ensureObjectiveReportModalHost();
     renderObjectiveEvaluationReportModal();
     $('#aspect_destinia_objective_report_modal').addClass('open').attr('aria-hidden', 'false');
 }
@@ -2478,18 +2486,15 @@ function bindUI() {
 
 
 function renderRoot() {
-    if (document.getElementById(ROOT_ID)) return;
-    $('#extensions_settings').append(buildSettingsHtml());
-
-    const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (modal && modal.parentElement !== document.body) {
-        document.body.appendChild(modal);
+    if (!document.getElementById(ROOT_ID)) {
+        $('#extensions_settings').append(buildSettingsHtml());
+        bindUI();
+        setupObjectiveReportAutoClose();
+        refreshUI();
     }
 
+    ensureObjectiveReportModalHost();
     ensureBusyIndicator();
-    bindUI();
-    setupObjectiveReportAutoClose();
-    refreshUI();
 }
 
 function onChatChanged() {
