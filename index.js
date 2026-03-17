@@ -72,6 +72,8 @@ const DEFAULT_PROFILE = Object.freeze({
     llmConnectionProfile: '',
     llmPreset: '',
     respectUserIntent: true,
+    timelineDeviationAllowed: false,
+    autoResolveDeviation: true,
     timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     timeline: structuredClone(DEFAULT_TIMELINE_TEMPLATE),
     state: {
@@ -764,7 +766,9 @@ function closeObjectiveReportModal() {
 function isDestiniaSettingsVisible() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return false;
-    return root.offsetParent !== null;
+    const style = window.getComputedStyle(root);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return root.getClientRects().length > 0;
 }
 
 function closeObjectiveReportModalIfSettingsHidden() {
@@ -1143,6 +1147,14 @@ function buildInjection(profile) {
 
     if (profile.state.lastIntentReason) {
         chunks.push(`Most recent intent reasoning: ${profile.state.lastIntentReason}`);
+    }
+
+    if (profile.autoResolveDeviation) {
+        if (profile.timelineDeviationAllowed) {
+            chunks.push('Timeline Deviation Handling: ALLOWED. If the user meaningfully deviates from the planned timeline, adapt the timeline structure in a realistic way. Update beat order/details and objective wording so the revised timeline reflects what happened naturally in-scene. Keep changes coherent, causal, and narratively rational.');
+        } else {
+            chunks.push('Timeline Deviation Handling: NOT ALLOWED. If deviation pressure appears, naturally re-align the scene to the active timeline beat without abrupt railroading. Preserve immersion while steering events and character choices back toward current objectives and transition guidance.');
+        }
     }
 
     return chunks.filter(Boolean).join('\n\n');
@@ -1769,6 +1781,8 @@ function profileToForm(profile) {
     $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
     $('#aspect_destinia_foreshadow').prop('checked', !!profile.foreshadowNextBeat);
     $('#aspect_destinia_respect_intent').prop('checked', !!profile.respectUserIntent);
+    $('#aspect_destinia_timeline_deviation_allowed').prop('checked', !!profile.timelineDeviationAllowed);
+    $('#aspect_destinia_auto_resolve_deviation').prop('checked', profile.autoResolveDeviation !== false);
     $('#aspect_destinia_strictness').val(profile.strictness ?? 0.55);
     $('#aspect_destinia_pacing').val(profile.pacingBias ?? 0.45);
     $('#aspect_destinia_threshold').val(profile.transitionThreshold ?? 0.72);
@@ -1803,6 +1817,8 @@ function clearForm() {
     $('#aspect_destinia_auto_advance').prop('checked', true);
     $('#aspect_destinia_foreshadow').prop('checked', true);
     $('#aspect_destinia_respect_intent').prop('checked', true);
+    $('#aspect_destinia_timeline_deviation_allowed').prop('checked', false);
+    $('#aspect_destinia_auto_resolve_deviation').prop('checked', true);
     $('#aspect_destinia_strictness').val(0.55);
     $('#aspect_destinia_pacing').val(0.45);
     $('#aspect_destinia_threshold').val(0.72);
@@ -1826,6 +1842,8 @@ function formToProfile(profile) {
     profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
     profile.foreshadowNextBeat = $('#aspect_destinia_foreshadow').is(':checked');
     profile.respectUserIntent = $('#aspect_destinia_respect_intent').is(':checked');
+    profile.timelineDeviationAllowed = $('#aspect_destinia_timeline_deviation_allowed').is(':checked');
+    profile.autoResolveDeviation = $('#aspect_destinia_auto_resolve_deviation').is(':checked');
     profile.strictness = Number($('#aspect_destinia_strictness').val() || 0.55);
     profile.pacingBias = Number($('#aspect_destinia_pacing').val() || 0.45);
     profile.transitionThreshold = Number($('#aspect_destinia_threshold').val() || 0.72);
@@ -2260,6 +2278,14 @@ function buildSettingsHtml() {
                             <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-Advance Plot After Objective Threshold Met</label>
                             <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
                             <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Timeline Deviation</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Auto-Resolve Deviation</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
+                            </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Story Progression</label>
                                 <select id="aspect_destinia_mode">
