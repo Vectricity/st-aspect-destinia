@@ -677,13 +677,19 @@ function normalizeObjectiveEvaluationIssueLabels(issues) {
 }
 
 function ensureBusyIndicator() {
+    const overlayHost = getOverlayHost();
+    if (!overlayHost) return;
     if (document.getElementById('aspect_destinia_busy_indicator')) return;
-    document.body.insertAdjacentHTML('beforeend', `
+    overlayHost.insertAdjacentHTML('beforeend', `
         <div id="aspect_destinia_busy_indicator" class="aspect-destinia-busy-indicator" aria-hidden="true">
             <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
             <span>Processing…</span>
         </div>
     `);
+}
+
+function getOverlayHost() {
+    return document.body || document.documentElement || null;
 }
 
 function setBusyIndicatorVisible(visible) {
@@ -835,10 +841,10 @@ function renderObjectiveEvaluationReportModal() {
 }
 
 function ensureObjectiveReportModalHost() {
-    const settingsHost = document.getElementById('extensions_settings');
+    const overlayHost = getOverlayHost();
     const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (settingsHost && modal && modal.parentElement !== settingsHost) {
-        settingsHost.appendChild(modal);
+    if (overlayHost && modal && modal.parentElement !== overlayHost) {
+        overlayHost.appendChild(modal);
     }
 }
 
