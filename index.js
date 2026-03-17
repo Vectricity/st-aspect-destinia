@@ -73,7 +73,7 @@ const DEFAULT_PROFILE = Object.freeze({
     llmPreset: '',
     respectUserIntent: true,
     timelineDeviationAllowed: false,
-    autoResolveDeviation: true,
+    autoResolveDeviation: false,
     timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     timeline: structuredClone(DEFAULT_TIMELINE_TEMPLATE),
     state: {
@@ -835,9 +835,10 @@ function renderObjectiveEvaluationReportModal() {
 }
 
 function ensureObjectiveReportModalHost() {
+    const settingsHost = document.getElementById('extensions_settings');
     const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (modal && modal.parentElement !== document.body) {
-        document.body.appendChild(modal);
+    if (settingsHost && modal && modal.parentElement !== settingsHost) {
+        settingsHost.appendChild(modal);
     }
 }
 
@@ -1782,7 +1783,7 @@ function profileToForm(profile) {
     $('#aspect_destinia_foreshadow').prop('checked', !!profile.foreshadowNextBeat);
     $('#aspect_destinia_respect_intent').prop('checked', !!profile.respectUserIntent);
     $('#aspect_destinia_timeline_deviation_allowed').prop('checked', !!profile.timelineDeviationAllowed);
-    $('#aspect_destinia_auto_resolve_deviation').prop('checked', profile.autoResolveDeviation !== false);
+    $('#aspect_destinia_auto_resolve_deviation').prop('checked', !!profile.autoResolveDeviation);
     $('#aspect_destinia_strictness').val(profile.strictness ?? 0.55);
     $('#aspect_destinia_pacing').val(profile.pacingBias ?? 0.45);
     $('#aspect_destinia_threshold').val(profile.transitionThreshold ?? 0.72);
@@ -1818,7 +1819,7 @@ function clearForm() {
     $('#aspect_destinia_foreshadow').prop('checked', true);
     $('#aspect_destinia_respect_intent').prop('checked', true);
     $('#aspect_destinia_timeline_deviation_allowed').prop('checked', false);
-    $('#aspect_destinia_auto_resolve_deviation').prop('checked', true);
+    $('#aspect_destinia_auto_resolve_deviation').prop('checked', false);
     $('#aspect_destinia_strictness').val(0.55);
     $('#aspect_destinia_pacing').val(0.45);
     $('#aspect_destinia_threshold').val(0.72);
