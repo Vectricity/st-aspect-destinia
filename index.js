@@ -60,9 +60,10 @@ const DEFAULT_PROFILE = Object.freeze({
     enabled: true,
     attachedChatKey: '',
     attachedChatLabel: '',
+    timelinePresetId: '',
     advancementMode: 'objectives', // objectives | hints
     autoAdvance: true,
-    foreshadowNextBeat: true,
+    foreshadowNextPlotPoint: true,
     strictness: 0.55,
     pacingBias: 0.45,
     transitionThreshold: 0.72,
@@ -97,16 +98,16 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Treat user roleplay direction as meaningful intent.',
                 'Treat lingering intent as explicit and purposeful: direct requests to wait/not move on, unfinished investigations, or clearly important unresolved conversations.',
                 'If the user is clearly pushing events forward, initiating a transition, resolving the present situation, or steering into the next development, allow progression.',
-                'Never railroad. Make progression feel like a natural consequence of the scene.',
+                'Preserve immersion and user agency while guiding the scene within the configured timeline constraints.',
                 'Do not make characters state their core motivations in an explicit or meta way unless the user directly asks for that explanation.'
             ].join('\n'),
 
-        currentBeatTemplate:
+        currentPlotPointTemplate:
             [
                 'Active story: {{story_title}}',
                 'Story style: {{story_style}}',
                 'Global progression notes: {{progression_notes}}',
-                'Current plot point index: {{current_index}} / {{total_beats}}',
+                'Current plot point index: {{current_index}} / {{total_plot_points}}',
                 'Current plot point title: {{current_title}}',
                 'Current plot point summary: {{current_summary}}',
                 'Current plot point steering: {{current_steering}}',
@@ -133,7 +134,7 @@ const DEFAULT_PROFILE = Object.freeze({
                 '{{current_hints}}'
             ].join('\n'),
 
-        nextBeatTemplate:
+        nextPlotPointTemplate:
             [
                 'Next plot point title: {{next_title}}',
                 'Next plot point summary: {{next_summary}}',
@@ -170,7 +171,7 @@ const DEFAULT_PROFILE = Object.freeze({
                 '  "decision": "stay" | "advance",',
                 '  "confidence": 0.0,',
                 '  "reason": "short explanation",',
-                '  "beat_complete": [true, false],',
+                '  "plot_point_complete": [true, false],',
                 '  "user_wants_to_linger": [true, false],',
                 '  "objective_completion": [true, false]',
                 '}',
@@ -195,20 +196,22 @@ const DEFAULT_PROFILE = Object.freeze({
 const DEFAULT_SETTINGS = Object.freeze({
     profiles: [],
     knownChats: [],
+    timelinePresets: [],
     ui: {
-        selectedProfileId: ''
+        selectedProfileId: '',
+        selectedTimelinePresetId: ''
     }
 });
 
 const TEMPLATE_VALIDATION_RULES = Object.freeze({
     aspect_destinia_timeline: {
         type: 'json',
-        label: 'Timeline JSON'
+        label: 'Timeline'
     },
     aspect_destinia_prompt_current: {
         type: 'template',
         label: 'Current Plot Point Template',
-        requiredTokens: ['{{current_index}}', '{{total_beats}}', '{{current_title}}', '{{current_summary}}', '{{current_steering}}', '{{current_pace}}']
+        requiredTokens: ['{{current_index}}', '{{total_plot_points}}', '{{current_title}}', '{{current_summary}}', '{{current_steering}}', '{{current_pace}}']
     },
     aspect_destinia_prompt_next: {
         type: 'template',
@@ -244,7 +247,7 @@ const TEMPLATE_VALIDATION_RULES = Object.freeze({
         type: 'template',
         label: 'Evaluator Prompt',
         requiredTokens: ['{{objective_completion_guidance}}', '{{story_title}}', '{{current_title}}', '{{current_summary}}', '{{current_objectives_inline}}', '{{current_objective_completion_inline}}', '{{current_hints_inline}}', '{{next_title}}', '{{recent_user_chat}}', '{{recent_chat}}'],
-        requiredSnippets: ['"decision"', '"confidence"', '"reason"', '"beat_complete"', '"user_wants_to_linger"', '"objective_completion"']
+        requiredSnippets: ['"decision"', '"confidence"', '"reason"', '"plot_point_complete"', '"user_wants_to_linger"', '"objective_completion"']
     }
 });
 
@@ -301,7 +304,53 @@ function ensureSettings() {
         extensionSettings[MODULE_ID].knownChats = [];
     }
 
+    if (!Array.isArray(extensionSettings[MODULE_ID].timelinePresets)) {
+        extensionSettings[MODULE_ID].timelinePresets = [];
+    }
+
+    ensureTimelinePresetDefaults(extensionSettings[MODULE_ID]);
+
     return extensionSettings[MODULE_ID];
+}
+
+function makeDefaultTimelinePreset() {
+    return {
+        id: 'default_timeline_preset',
+        name: 'Default Timeline',
+        timeline: structuredClone(DEFAULT_TIMELINE_TEMPLATE),
+        timelineText: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2)
+    };
+}
+
+function ensureTimelinePresetDefaults(settings) {
+    const presets = Array.isArray(settings?.timelinePresets) ? settings.timelinePresets : [];
+    const normalized = presets
+        .map((preset) => {
+            const id = String(preset?.id || '').trim() || makeId('timeline_preset');
+            const name = String(preset?.name || '').trim() || 'Untitled Timeline Preset';
+            const timeline = normalizeTimeline(structuredClone(preset?.timeline || safeParseTimeline(preset?.timelineText) || DEFAULT_TIMELINE_TEMPLATE));
+            return {
+                id,
+                name,
+                timeline,
+                timelineText: JSON.stringify(timeline, null, 2)
+            };
+        });
+
+    if (!normalized.some(preset => preset.id === 'default_timeline_preset')) {
+        normalized.unshift(makeDefaultTimelinePreset());
+    }
+
+    settings.timelinePresets = normalized;
+
+    if (!settings.ui || typeof settings.ui !== 'object') {
+        settings.ui = structuredClone(DEFAULT_SETTINGS.ui);
+    }
+
+    const selectedPresetId = String(settings.ui.selectedTimelinePresetId || '').trim();
+    if (!selectedPresetId || !normalized.some(preset => preset.id === selectedPresetId)) {
+        settings.ui.selectedTimelinePresetId = normalized[0]?.id || '';
+    }
 }
 
 function makeId(prefix = 'destinia') {
@@ -382,6 +431,23 @@ function getProfiles() {
     return ensureSettings().profiles;
 }
 
+function getTimelinePresets() {
+    return ensureSettings().timelinePresets;
+}
+
+function getTimelinePresetById(presetId) {
+    return getTimelinePresets().find(preset => preset.id === presetId) || null;
+}
+
+function getSelectedTimelinePresetId() {
+    return ensureSettings().ui.selectedTimelinePresetId || '';
+}
+
+function setSelectedTimelinePresetId(presetId) {
+    ensureSettings().ui.selectedTimelinePresetId = presetId || '';
+    saveSettings();
+}
+
 function getProfileById(profileId) {
     return getProfiles().find(p => p.id === profileId) || null;
 }
@@ -437,7 +503,7 @@ function safeParseTimeline(text) {
 
 function validateTimelineStructure(timeline) {
     if (!timeline || typeof timeline !== 'object' || Array.isArray(timeline)) {
-        return ['Timeline JSON must be an object.'];
+        return ['Timeline must be an object.'];
     }
 
     const issues = [];
@@ -453,7 +519,7 @@ function validateTimelineStructure(timeline) {
     }
 
     if (!Array.isArray(timeline.plotPoints)) {
-        return issues.length ? issues : ['Timeline JSON must include plotPoints[].'];
+        return issues.length ? issues : ['Timeline must include plotPoints[].'];
     }
 
     timeline.plotPoints.forEach((point, index) => {
@@ -538,7 +604,7 @@ function updateFieldValidationIndicators() {
     }
 }
 
-function getCurrentBeat(profile) {
+function getCurrentPlotPoint(profile) {
     const timeline = getActiveTimeline(profile);
     const points = timeline?.plotPoints || [];
     const idx = Math.max(0, Math.min(profile.state.currentIndex || 0, Math.max(points.length - 1, 0)));
@@ -546,7 +612,7 @@ function getCurrentBeat(profile) {
     return points[idx] || null;
 }
 
-function getNextBeat(profile) {
+function getNextPlotPoint(profile) {
     const timeline = getActiveTimeline(profile);
     const points = timeline?.plotPoints || [];
     return points[(profile.state.currentIndex || 0) + 1] || null;
@@ -656,6 +722,42 @@ function getSillyTavernChatPresets() {
     return [];
 }
 
+function getActiveEvaluatorConnectionLabel(profile) {
+    const selectedValue = String(profile?.llmConnectionProfile || '').trim();
+    if (!selectedValue) {
+        const ctx = getCtx();
+        return String(
+            ctx.activeConnectionProfile
+            || ctx.active_connection_profile
+            || ctx.currentConnectionProfile
+            || ctx.current_connection_profile
+            || 'Active Connection Profile'
+        ).trim() || 'Active Connection Profile';
+    }
+
+    const match = getSillyTavernConnectionProfiles().find(item => item.value === selectedValue);
+    return match?.label || selectedValue;
+}
+
+function getActiveEvaluatorPresetLabel(profile) {
+    const selectedValue = String(profile?.llmPreset || '').trim();
+    if (!selectedValue) {
+        const ctx = getCtx();
+        return String(
+            ctx.activeChatCompletionPreset
+            || ctx.active_chat_completion_preset
+            || ctx.currentChatCompletionPreset
+            || ctx.current_chat_completion_preset
+            || ctx.activePreset
+            || ctx.active_preset
+            || 'Chat Completion Preset'
+        ).trim() || 'Chat Completion Preset';
+    }
+
+    const match = getSillyTavernChatPresets().find(item => item.value === selectedValue);
+    return match?.label || selectedValue;
+}
+
 function findNestedCollectionsByPathKeywords(root, requiredKeywords = []) {
     const matches = [];
     const seen = new WeakSet();
@@ -703,13 +805,13 @@ function renderEvaluatorModelOptions(profile) {
     const profiles = getSillyTavernConnectionProfiles();
     const presets = getSillyTavernChatPresets();
 
-    connectionSelect.empty().append('<option value="">Use Active Connection Profile</option>');
+    connectionSelect.empty().append(`<option value="">Use Current ${escapeHtml(getActiveEvaluatorConnectionLabel(profile))}</option>`);
     for (const item of profiles) {
         connectionSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
     connectionSelect.val(profile?.llmConnectionProfile || '');
 
-    presetSelect.empty().append('<option value="">Use Active Chat Completion Preset</option>');
+    presetSelect.empty().append(`<option value="">Use Current ${escapeHtml(getActiveEvaluatorPresetLabel(profile))}</option>`);
     for (const item of presets) {
         presetSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
@@ -839,14 +941,14 @@ function replaceMacros(template, data) {
 
 function buildTemplateData(profile) {
     const timeline = getActiveTimeline(profile) || {};
-    const current = getCurrentBeat(profile) || {};
-    const next = getNextBeat(profile) || {};
+    const current = getCurrentPlotPoint(profile) || {};
+    const next = getNextPlotPoint(profile) || {};
 
     return {
         story_title: timeline.storyTitle || '',
         story_style: timeline.systemStyle || '',
         progression_notes: timeline.progressionNotes || '',
-        total_beats: String(timeline.plotPoints?.length || 0),
+        total_plot_points: String(timeline.plotPoints?.length || 0),
         current_index: String((profile.state.currentIndex || 0) + 1),
         current_title: current.title || '',
         current_summary: current.summary || '',
@@ -877,7 +979,7 @@ function buildInjection(profile) {
 
     chunks.push(replaceMacros(prompts.injectionIntro, data));
     chunks.push(replaceMacros(prompts.guidancePrinciples, data));
-    chunks.push(replaceMacros(prompts.currentBeatTemplate, data));
+    chunks.push(replaceMacros(prompts.currentPlotPointTemplate, data));
     chunks.push(replaceMacros(prompts.transitionTemplate, data));
 
     if (profile.advancementMode === 'objectives') {
@@ -886,8 +988,8 @@ function buildInjection(profile) {
         chunks.push(replaceMacros(prompts.hintModeTemplate, data));
     }
 
-    if (profile.foreshadowNextBeat && getNextBeat(profile)) {
-        chunks.push(replaceMacros(prompts.nextBeatTemplate, data));
+    if (profile.foreshadowNextPlotPoint && getNextPlotPoint(profile)) {
+        chunks.push(replaceMacros(prompts.nextPlotPointTemplate, data));
     }
 
     chunks.push(replaceMacros(prompts.pacingInstruction, data));
@@ -906,7 +1008,7 @@ function buildInjection(profile) {
         if (profile.timelineDeviationAllowed) {
             chunks.push('Timeline Deviation Handling: ALLOWED. If the user meaningfully deviates from the planned timeline, adapt the timeline structure in a realistic way. Update plot point order/details and objective wording so the revised timeline reflects what happened naturally in-scene. Keep changes coherent, causal, and narratively rational.');
         } else {
-            chunks.push('Timeline Deviation Handling: NOT ALLOWED. If deviation pressure appears, naturally re-align the scene to the active timeline plot point without abrupt railroading. Preserve immersion while steering events and character choices back toward current objectives and transition guidance.');
+            chunks.push('Timeline Deviation Handling: NOT ALLOWED. If deviation pressure appears, naturally re-align the scene to the active timeline plot point without abrupt or immersion-breaking steering. Preserve user agency where possible while guiding events and character choices back toward current objectives and transition guidance.');
         }
     }
 
@@ -1003,8 +1105,8 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         return;
     }
 
-    const currentBeat = getCurrentBeat(profile);
-    if (!currentBeat) {
+    const currentPlotPoint = getCurrentPlotPoint(profile);
+    if (!currentPlotPoint) {
         if (notify) toastr.warning(`${MODULE_NAME}: no current plot point is available.`);
         return;
     }
@@ -1035,7 +1137,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
 
         const decision = parsed.decision === 'advance' ? 'advance' : 'stay';
         const confidence = clamp01(Number(parsed.confidence) || 0);
-        const beatComplete = parseBooleanLike(parsed.beat_complete, false);
+        const plotPointComplete = parseBooleanLike(parsed.plot_point_complete, false);
         const userWantsToLinger = parseBooleanLike(parsed.user_wants_to_linger, false);
         let objectiveCompletion = null;
         if (Array.isArray(parsed.objective_completion)) {
@@ -1046,7 +1148,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
 
         let finalDecision = decision;
         if (userWantsToLinger) finalDecision = 'stay';
-        if (!beatComplete && finalDecision === 'advance' && profile.advancementMode === 'objectives') {
+        if (!plotPointComplete && finalDecision === 'advance' && profile.advancementMode === 'objectives') {
             finalDecision = 'stay';
         }
 
@@ -1055,9 +1157,9 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         profile.state.lastIntentReason = String(parsed.reason || 'No reason provided.');
 
         if (objectiveCompletion && profile.advancementMode === 'objectives') {
-            const mutableCurrentBeat = getCurrentBeat(profile);
-            if (Array.isArray(mutableCurrentBeat?.objectives)) {
-                mutableCurrentBeat.objectives = mutableCurrentBeat.objectives.map((item, idx) => {
+            const mutableCurrentPlotPoint = getCurrentPlotPoint(profile);
+            if (Array.isArray(mutableCurrentPlotPoint?.objectives)) {
+                mutableCurrentPlotPoint.objectives = mutableCurrentPlotPoint.objectives.map((item, idx) => {
                     const normalized = normalizeObjectiveItem(item);
                     if (objectiveCompletion[idx]) {
                         normalized.completed = true;
@@ -1075,20 +1177,20 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             evaluatorDecision: decision,
             finalDecision,
             confidence,
-            beatComplete,
+            plotPointComplete,
             userWantsToLinger,
             advancementMode: profile.advancementMode,
-            currentBeatTitle: currentBeat?.title || '',
-            currentBeatSummary: currentBeat?.summary || '',
-            currentBeatObjectives: Array.isArray(currentBeat?.objectives) ? currentBeat.objectives : [],
-            currentBeatHints: Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [],
-            nextBeatTitle: getNextBeat(profile)?.title || 'None',
-            nextBeatSummary: getNextBeat(profile)?.summary || 'No next plot point.'
+            currentPlotPointTitle: currentPlotPoint?.title || '',
+            currentPlotPointSummary: currentPlotPoint?.summary || '',
+            currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? currentPlotPoint.objectives : [],
+            currentPlotPointHints: Array.isArray(currentPlotPoint?.completionHints) ? currentPlotPoint.completionHints : [],
+            nextPlotPointTitle: getNextPlotPoint(profile)?.title || 'None',
+            nextPlotPointSummary: getNextPlotPoint(profile)?.summary || 'No next plot point.'
         };
 
-        const updatedBeat = getCurrentBeat(profile);
-        const updatedObjectives = Array.isArray(updatedBeat?.objectives)
-            ? updatedBeat.objectives.map(normalizeObjectiveItem)
+        const updatedPlotPoint = getCurrentPlotPoint(profile);
+        const updatedObjectives = Array.isArray(updatedPlotPoint?.objectives)
+            ? updatedPlotPoint.objectives.map(normalizeObjectiveItem)
             : [];
         const objectiveCompletionRatio = updatedObjectives.length
             ? updatedObjectives.filter(objective => objective.completed).length / updatedObjectives.length
@@ -1101,7 +1203,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         const canAdvance =
             profile.autoAdvance &&
             !userWantsToLinger &&
-            !!getNextBeat(profile) &&
+            !!getNextPlotPoint(profile) &&
             (
                 (finalDecision === 'advance' && confidence >= Number(profile.transitionThreshold || 0.72)) ||
                 objectiveReadyToAdvance
@@ -1110,9 +1212,9 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         if (canAdvance) {
             profile.state.currentIndex += 1;
             profile.state.lastTransitionAt = Date.now();
-            const newBeat = getCurrentBeat(profile);
+            const newPlotPoint = getCurrentPlotPoint(profile);
             profile.state.lastIntentReason = `Advanced after ${trigger}: ${profile.state.lastIntentReason}`;
-            toastr.info(`${MODULE_NAME}: moved to "${newBeat?.title || 'next plot point'}".`);
+            toastr.info(`${MODULE_NAME}: moved to "${newPlotPoint?.title || 'next plot point'}".`);
         }
 
         persistProfile(profile);
@@ -1162,12 +1264,12 @@ function findLatestAssistantMessageElement() {
 }
 
 function buildDiagnosticBoxHtml(profile) {
-    const current = getCurrentBeat(profile);
-    const next = getNextBeat(profile);
+    const current = getCurrentPlotPoint(profile);
+    const next = getNextPlotPoint(profile);
     const diag = profile?.state?.lastDiagnostic || {};
     const infoUsed = [];
-    if (Array.isArray(diag.currentBeatObjectives) && diag.currentBeatObjectives.length) {
-        const objectivesHtml = diag.currentBeatObjectives
+    if (Array.isArray(diag.currentPlotPointObjectives) && diag.currentPlotPointObjectives.length) {
+        const objectivesHtml = diag.currentPlotPointObjectives
             .map(item => {
                 const objective = normalizeObjectiveItem(item);
                 const icon = objective.completed ? '☑' : '☐';
@@ -1176,8 +1278,8 @@ function buildDiagnosticBoxHtml(profile) {
             .join('');
         infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Objectives:</b></div><div class="aspect-destinia-diagnostic-objectives">${objectivesHtml}</div>`);
     }
-    if (Array.isArray(diag.currentBeatHints) && diag.currentBeatHints.length) {
-        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Completion hints:</b> ${escapeHtml(diag.currentBeatHints.join(' | '))}</div>`);
+    if (Array.isArray(diag.currentPlotPointHints) && diag.currentPlotPointHints.length) {
+        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Completion hints:</b> ${escapeHtml(diag.currentPlotPointHints.join(' | '))}</div>`);
     }
 
     return `
@@ -1353,9 +1455,9 @@ function evaluateIntentLocally(profile, recentChatText) {
         reason = 'Evaluator detected linger/deepen wording from the user.';
     }
 
-    const currentBeat = getCurrentBeat(profile);
-    const hints = Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [];
-    const objectives = Array.isArray(currentBeat?.objectives) ? currentBeat.objectives.map(normalizeObjectiveItem) : [];
+    const currentPlotPoint = getCurrentPlotPoint(profile);
+    const hints = Array.isArray(currentPlotPoint?.completionHints) ? currentPlotPoint.completionHints : [];
+    const objectives = Array.isArray(currentPlotPoint?.objectives) ? currentPlotPoint.objectives.map(normalizeObjectiveItem) : [];
     const completionVerbSignals = [
         'done', 'completed', 'finished', 'resolved', 'handled', 'achieved', 'accomplished', 'wrapped up', 'took care of'
     ];
@@ -1402,18 +1504,18 @@ function evaluateIntentLocally(profile, recentChatText) {
     const completionRatio = objectiveCompletion.length > 0
         ? objectiveCompletion.filter(Boolean).length / objectiveCompletion.length
         : 0;
-    const beatCompleteFromObjectives = objectiveCompletion.length > 0
+    const plotPointCompleteFromObjectives = objectiveCompletion.length > 0
         ? completionRatio >= getObjectiveCompletionThreshold(profile)
         : false;
-    const beatComplete = hints.length > 0
-        ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24))) || beatCompleteFromObjectives
-        : beatCompleteFromObjectives;
+    const plotPointComplete = hints.length > 0
+        ? hints.some(h => userLinesLower.includes(String(h).toLowerCase().slice(0, 24))) || plotPointCompleteFromObjectives
+        : plotPointCompleteFromObjectives;
 
     return {
         decision,
         confidence,
         reason,
-        beat_complete: beatComplete,
+        plot_point_complete: plotPointComplete,
         user_wants_to_linger: explicitLingerHits > 0 || deepenTaskHits > 0 || (importantConversationSignal && conversationHoldSignal),
         objective_completion: objectiveCompletion
     };
@@ -1439,12 +1541,14 @@ function createProfileAttachedToCurrentChat() {
 
     const chatKey = getChatKey();
     const chatLabel = getChatLabel();
+    const defaultPresetId = getTimelinePresets()[0]?.id || '';
 
     const profile = mergeDeep(structuredClone(DEFAULT_PROFILE), {
         id: makeId('entry'),
         entryName: chatLabel || 'Current Chat',
         attachedChatKey: chatKey,
-        attachedChatLabel: chatLabel
+        attachedChatLabel: chatLabel,
+        timelinePresetId: defaultPresetId
     });
 
     getProfiles().push(profile);
@@ -1463,6 +1567,9 @@ function createProfileAttachedToCurrentChat() {
 function deleteSelectedProfile() {
     const profile = getDisplayedProfile();
     if (!profile) return;
+
+    const confirmed = window.confirm(`Delete profile "${getProfileDisplayName(profile)}"? This cannot be undone.`);
+    if (!confirmed) return;
 
     const settings = ensureSettings();
     settings.profiles = settings.profiles.filter(p => p.id !== profile.id);
@@ -1553,7 +1660,7 @@ function profileToForm(profile) {
     $('#aspect_destinia_enabled').prop('checked', !!profile.enabled);
     $('#aspect_destinia_mode').val(profile.advancementMode || 'objectives');
     $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
-    $('#aspect_destinia_foreshadow').prop('checked', !!profile.foreshadowNextBeat);
+    $('#aspect_destinia_foreshadow').prop('checked', !!profile.foreshadowNextPlotPoint);
     $('#aspect_destinia_respect_intent').prop('checked', !!profile.respectUserIntent);
     $('#aspect_destinia_timeline_deviation_allowed').prop('checked', !!profile.timelineDeviationAllowed);
     $('#aspect_destinia_auto_resolve_deviation').prop('checked', !!profile.autoResolveDeviation);
@@ -1565,13 +1672,14 @@ function profileToForm(profile) {
     renderEvaluatorModelOptions(profile);
     $('#aspect_destinia_chat_select').val(profile.attachedChatKey || '');
     $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
+    syncTimelinePresetSelection(profile);
 
     $('#aspect_destinia_prompt_intro').val(profile.prompts.injectionIntro || '');
     $('#aspect_destinia_prompt_principles').val(profile.prompts.guidancePrinciples || '');
-    $('#aspect_destinia_prompt_current').val(profile.prompts.currentBeatTemplate || '');
+    $('#aspect_destinia_prompt_current').val(profile.prompts.currentPlotPointTemplate || '');
     $('#aspect_destinia_prompt_objectives').val(profile.prompts.objectiveModeTemplate || '');
     $('#aspect_destinia_prompt_hints').val(profile.prompts.hintModeTemplate || '');
-    $('#aspect_destinia_prompt_next').val(profile.prompts.nextBeatTemplate || '');
+    $('#aspect_destinia_prompt_next').val(profile.prompts.nextPlotPointTemplate || '');
     $('#aspect_destinia_prompt_transition').val(profile.prompts.transitionTemplate || '');
     $('#aspect_destinia_prompt_linger').val(profile.prompts.lingerInstruction || '');
     $('#aspect_destinia_prompt_advance').val(profile.prompts.advanceInstruction || '');
@@ -1600,12 +1708,13 @@ function clearForm() {
     $('#aspect_destinia_eval_preset').val('');
     $('#aspect_destinia_chat_select').val('');
     $('#aspect_destinia_timeline').val(JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
+    renderTimelinePresetOptions();
     $('#aspect_destinia_prompt_intro').val(DEFAULT_PROFILE.prompts.injectionIntro || '');
     $('#aspect_destinia_prompt_principles').val(DEFAULT_PROFILE.prompts.guidancePrinciples || '');
-    $('#aspect_destinia_prompt_current').val(DEFAULT_PROFILE.prompts.currentBeatTemplate || '');
+    $('#aspect_destinia_prompt_current').val(DEFAULT_PROFILE.prompts.currentPlotPointTemplate || '');
     $('#aspect_destinia_prompt_objectives').val(DEFAULT_PROFILE.prompts.objectiveModeTemplate || '');
     $('#aspect_destinia_prompt_hints').val(DEFAULT_PROFILE.prompts.hintModeTemplate || '');
-    $('#aspect_destinia_prompt_next').val(DEFAULT_PROFILE.prompts.nextBeatTemplate || '');
+    $('#aspect_destinia_prompt_next').val(DEFAULT_PROFILE.prompts.nextPlotPointTemplate || '');
     $('#aspect_destinia_prompt_transition').val(DEFAULT_PROFILE.prompts.transitionTemplate || '');
     $('#aspect_destinia_prompt_linger').val(DEFAULT_PROFILE.prompts.lingerInstruction || '');
     $('#aspect_destinia_prompt_advance').val(DEFAULT_PROFILE.prompts.advanceInstruction || '');
@@ -1621,7 +1730,7 @@ function formToProfile(profile) {
     try {
         parsedTimeline = JSON.parse(timelineText);
     } catch {
-        throw new Error('Timeline JSON must be valid and include plotPoints[].');
+        throw new Error('Timeline must be valid and include plotPoints[].');
     }
 
     const timelineIssues = validateTimelineStructure(parsedTimeline);
@@ -1634,7 +1743,7 @@ function formToProfile(profile) {
     profile.enabled = $('#aspect_destinia_enabled').is(':checked');
     profile.advancementMode = $('#aspect_destinia_mode').val();
     profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
-    profile.foreshadowNextBeat = $('#aspect_destinia_foreshadow').is(':checked');
+    profile.foreshadowNextPlotPoint = $('#aspect_destinia_foreshadow').is(':checked');
     profile.respectUserIntent = $('#aspect_destinia_respect_intent').is(':checked');
     profile.timelineDeviationAllowed = $('#aspect_destinia_timeline_deviation_allowed').is(':checked');
     profile.autoResolveDeviation = $('#aspect_destinia_auto_resolve_deviation').is(':checked');
@@ -1650,16 +1759,17 @@ function formToProfile(profile) {
     const knownChat = ensureSettings().knownChats.find(x => x.key === selectedChatKey);
     profile.attachedChatKey = selectedChatKey;
     profile.attachedChatLabel = knownChat?.label || profile.attachedChatLabel || '';
+    profile.timelinePresetId = $('#aspect_destinia_timeline_preset_select').val() || '';
 
     profile.timelineText = $('#aspect_destinia_timeline').val();
     profile.timeline = parsedTimeline;
 
     profile.prompts.injectionIntro = $('#aspect_destinia_prompt_intro').val();
     profile.prompts.guidancePrinciples = $('#aspect_destinia_prompt_principles').val();
-    profile.prompts.currentBeatTemplate = $('#aspect_destinia_prompt_current').val();
+    profile.prompts.currentPlotPointTemplate = $('#aspect_destinia_prompt_current').val();
     profile.prompts.objectiveModeTemplate = $('#aspect_destinia_prompt_objectives').val();
     profile.prompts.hintModeTemplate = $('#aspect_destinia_prompt_hints').val();
-    profile.prompts.nextBeatTemplate = $('#aspect_destinia_prompt_next').val();
+    profile.prompts.nextPlotPointTemplate = $('#aspect_destinia_prompt_next').val();
     profile.prompts.transitionTemplate = $('#aspect_destinia_prompt_transition').val();
     profile.prompts.lingerInstruction = $('#aspect_destinia_prompt_linger').val();
     profile.prompts.advanceInstruction = $('#aspect_destinia_prompt_advance').val();
@@ -1667,9 +1777,9 @@ function formToProfile(profile) {
     profile.prompts.objectiveCompletionGuidance = $('#aspect_destinia_prompt_objective_guidance').val();
     profile.prompts.evaluatorPrompt = $('#aspect_destinia_prompt_evaluator').val();
 
-    const totalBeats = profile.timeline.plotPoints.length;
-    if (profile.state.currentIndex >= totalBeats) {
-        profile.state.currentIndex = Math.max(0, totalBeats - 1);
+    const totalPlotPoints = profile.timeline.plotPoints.length;
+    if (profile.state.currentIndex >= totalPlotPoints) {
+        profile.state.currentIndex = Math.max(0, totalPlotPoints - 1);
     }
 }
 
@@ -1709,7 +1819,7 @@ function exportDisplayedProfileToFile() {
 function exportTimelineToFile() {
     const timelineText = String($('#aspect_destinia_timeline').val() || '').trim();
     if (!timelineText) {
-        toastr.warning(`${MODULE_NAME}: timeline JSON is empty.`);
+        toastr.warning(`${MODULE_NAME}: timeline is empty.`);
         return;
     }
 
@@ -1717,17 +1827,17 @@ function exportTimelineToFile() {
     try {
         parsed = JSON.parse(timelineText);
     } catch {
-        toastr.error(`${MODULE_NAME}: cannot export invalid timeline JSON.`);
+        toastr.error(`${MODULE_NAME}: cannot export invalid timeline.`);
         return;
     }
 
     const timelineIssues = validateTimelineStructure(parsed);
     if (timelineIssues.length) {
-        toastr.error(`${MODULE_NAME}: cannot export invalid timeline JSON (${timelineIssues.join('; ')}).`);
+        toastr.error(`${MODULE_NAME}: cannot export invalid timeline (${timelineIssues.join('; ')}).`);
         return;
     }
 
-    downloadJsonToFile(normalizeTimeline(parsed), 'timeline_json');
+    downloadJsonToFile(normalizeTimeline(parsed), 'timeline');
 }
 
 function importTimelineFromFile(event) {
@@ -1742,7 +1852,7 @@ function importTimelineFromFile(event) {
             try {
                 parsed = JSON.parse(text);
             } catch {
-                throw new Error('timeline JSON must be valid JSON.');
+                throw new Error('timeline must be valid JSON.');
             }
 
             const timelineIssues = validateTimelineStructure(parsed);
@@ -1752,7 +1862,7 @@ function importTimelineFromFile(event) {
 
             $('#aspect_destinia_timeline').val(JSON.stringify(normalizeTimeline(parsed), null, 2));
             updateFieldValidationIndicators();
-            toastr.success(`${MODULE_NAME}: imported timeline JSON from file.`);
+            toastr.success(`${MODULE_NAME}: imported timeline from file.`);
         } catch (err) {
             toastr.error(`${MODULE_NAME}: failed to import timeline (${err.message}).`);
         } finally {
@@ -1775,6 +1885,9 @@ function importProfileFromFile(event) {
             imported.entryName = `${getProfileDisplayName(imported) || 'Imported Profile'} (Imported)`;
             imported.timeline = normalizeTimeline(imported.timeline || safeParseTimeline(imported.timelineText) || structuredClone(DEFAULT_TIMELINE_TEMPLATE));
             imported.timelineText = JSON.stringify(imported.timeline, null, 2);
+            if (!getTimelinePresetById(imported.timelinePresetId)) {
+                imported.timelinePresetId = '';
+            }
             getProfiles().push(imported);
             persistProfile(imported);
             setSelectedProfileId(imported.id);
@@ -1798,8 +1911,8 @@ const FIELD_DEFAULTS = {
     aspect_destinia_timeline: () => JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     aspect_destinia_prompt_intro: () => DEFAULT_PROFILE.prompts.injectionIntro,
     aspect_destinia_prompt_principles: () => DEFAULT_PROFILE.prompts.guidancePrinciples,
-    aspect_destinia_prompt_current: () => DEFAULT_PROFILE.prompts.currentBeatTemplate,
-    aspect_destinia_prompt_next: () => DEFAULT_PROFILE.prompts.nextBeatTemplate,
+    aspect_destinia_prompt_current: () => DEFAULT_PROFILE.prompts.currentPlotPointTemplate,
+    aspect_destinia_prompt_next: () => DEFAULT_PROFILE.prompts.nextPlotPointTemplate,
     aspect_destinia_prompt_transition: () => DEFAULT_PROFILE.prompts.transitionTemplate,
     aspect_destinia_prompt_objectives: () => DEFAULT_PROFILE.prompts.objectiveModeTemplate,
     aspect_destinia_prompt_hints: () => DEFAULT_PROFILE.prompts.hintModeTemplate,
@@ -1851,6 +1964,114 @@ function addFieldResetButtons() {
     }
 }
 
+function selectTimelinePreset() {
+    const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
+    const preset = getTimelinePresetById(presetId);
+    const profile = getDisplayedProfile();
+
+    if (profile) {
+        profile.timelinePresetId = preset?.id || '';
+    }
+
+    if (!preset) {
+        setSelectedTimelinePresetId(getTimelinePresets()[0]?.id || '');
+        return;
+    }
+
+    $('#aspect_destinia_timeline').val(preset.timelineText || JSON.stringify(preset.timeline, null, 2));
+    updateFieldValidationIndicators();
+    setSelectedTimelinePresetId(preset.id);
+    toastr.info(`${MODULE_NAME}: loaded timeline preset "${preset.name}".`);
+}
+
+function saveTimelinePresetFromEditor({ duplicate = false } = {}) {
+    const timelineText = String($('#aspect_destinia_timeline').val() || '').trim();
+    if (!timelineText) {
+        toastr.warning(`${MODULE_NAME}: timeline is empty.`);
+        return;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(timelineText);
+    } catch {
+        toastr.error(`${MODULE_NAME}: timeline must be valid JSON before saving a preset.`);
+        return;
+    }
+
+    const issues = validateTimelineStructure(parsed);
+    if (issues.length) {
+        toastr.error(`${MODULE_NAME}: timeline must be valid before saving a preset (${issues.join('; ')}).`);
+        return;
+    }
+
+    parsed = normalizeTimeline(parsed);
+    const selectedPresetId = $('#aspect_destinia_timeline_preset_select').val() || '';
+    const existingPreset = duplicate ? null : getTimelinePresetById(selectedPresetId);
+    const defaultName = duplicate
+        ? `${existingPreset?.name || 'Timeline Preset'} (Copy)`
+        : (existingPreset?.name || 'Timeline Preset');
+    const enteredName = window.prompt(duplicate ? 'Duplicate timeline preset as' : 'Save timeline preset as', defaultName);
+    if (enteredName === null) return;
+
+    const name = String(enteredName || '').trim();
+    if (!name) {
+        toastr.warning(`${MODULE_NAME}: preset name cannot be empty.`);
+        return;
+    }
+
+    const presets = getTimelinePresets();
+    const preset = existingPreset || {
+        id: makeId('timeline_preset')
+    };
+
+    preset.name = name;
+    preset.timeline = parsed;
+    preset.timelineText = JSON.stringify(parsed, null, 2);
+
+    if (!existingPreset) {
+        presets.push(preset);
+    }
+
+    const profile = getDisplayedProfile();
+    if (profile) {
+        profile.timelinePresetId = preset.id;
+    }
+
+    setSelectedTimelinePresetId(preset.id);
+    saveSettings();
+    renderTimelinePresetOptions(profile);
+    $('#aspect_destinia_timeline_preset_select').val(preset.id);
+    toastr.success(`${MODULE_NAME}: ${duplicate ? 'duplicated' : 'saved'} timeline preset "${preset.name}".`);
+}
+
+function deleteSelectedTimelinePreset() {
+    const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
+    const preset = getTimelinePresetById(presetId);
+    if (!preset) {
+        toastr.warning(`${MODULE_NAME}: select a timeline preset to delete.`);
+        return;
+    }
+
+    const confirmed = window.confirm(`Delete timeline preset "${preset.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const settings = ensureSettings();
+    settings.timelinePresets = settings.timelinePresets.filter(item => item.id !== preset.id);
+    ensureTimelinePresetDefaults(settings);
+
+    for (const profile of settings.profiles) {
+        if (profile.timelinePresetId === preset.id) {
+            profile.timelinePresetId = '';
+        }
+    }
+
+    saveSettings();
+    renderTimelinePresetOptions(getDisplayedProfile() || getActiveProfile());
+    $('#aspect_destinia_timeline_preset_select').val('');
+    toastr.info(`${MODULE_NAME}: deleted timeline preset "${preset.name}".`);
+}
+
 async function clearCurrentChatMessages() {
     const ctx = getCtx();
     const count = Array.isArray(ctx.chat) ? ctx.chat.length : 0;
@@ -1858,6 +2079,9 @@ async function clearCurrentChatMessages() {
         toastr.info(`${MODULE_NAME}: current chat is already empty.`);
         return;
     }
+
+    const confirmed = window.confirm(`Delete ${count} current chat message(s)? This cannot be undone.`);
+    if (!confirmed) return;
 
     try {
         if (typeof ctx.clearChat === 'function') {
@@ -1907,7 +2131,7 @@ function saveDisplayedProfile() {
     }
 }
 
-function resetCurrentBeatToFirst() {
+function resetCurrentPlotPointToFirst() {
     const profile = getDisplayedProfile();
     if (!profile) return;
     profile.state.currentIndex = 0;
@@ -1919,7 +2143,7 @@ function resetCurrentBeatToFirst() {
     refreshUI();
 }
 
-function stepBeat(delta) {
+function stepPlotPoint(delta) {
     const profile = getDisplayedProfile();
     if (!profile) return;
 
@@ -1933,8 +2157,8 @@ function stepBeat(delta) {
 }
 
 function renderStatus(profile) {
-    const current = getCurrentBeat(profile);
-    const next = getNextBeat(profile);
+    const current = getCurrentPlotPoint(profile);
+    const next = getNextPlotPoint(profile);
 
     $('#aspect_destinia_status').html(`
         <div class="aspect-destinia-status-grid">
@@ -2012,6 +2236,29 @@ function renderKnownChatOptions() {
     }
 }
 
+function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiveProfile()) {
+    const select = $('#aspect_destinia_timeline_preset_select');
+    if (!select.length) return;
+
+    const presets = getTimelinePresets();
+    const selectedPresetId = profile
+        ? String(profile.timelinePresetId || '').trim()
+        : getSelectedTimelinePresetId();
+
+    select.empty();
+    select.append('<option value="">-- Custom Timeline --</option>');
+    for (const preset of presets) {
+        select.append(`<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`);
+    }
+    select.val(selectedPresetId && presets.some(preset => preset.id === selectedPresetId) ? selectedPresetId : '');
+}
+
+function syncTimelinePresetSelection(profile) {
+    const presetId = String(profile?.timelinePresetId || '').trim();
+    setSelectedTimelinePresetId(presetId || getTimelinePresets()[0]?.id || '');
+    renderTimelinePresetOptions(profile);
+}
+
 function refreshUI() {
     if (!document.getElementById(ROOT_ID)) return;
 
@@ -2023,9 +2270,10 @@ function refreshUI() {
         profileToForm(profile);
     } else {
         clearForm();
-        $('#aspect_destinia_status').html('<div class="aspect-destinia-empty">No profile selected. Create one to bind story progression to this chat.</div>');
+        $('#aspect_destinia_status').html('<div class="aspect-destinia-empty">No profile selected. Create one to bind plot progression to this chat.</div>');
     }
 
+    renderTimelinePresetOptions(profile);
     updateSliderDisplays();
     updateExtensionPrompt();
 }
@@ -2069,9 +2317,9 @@ function buildSettingsHtml() {
                             </div>
 
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row aspect-destinia-profile-button-row-primary">
-                                <button id="aspect_destinia_create" class="menu_button">Create Profile for Current Chat</button>
+                                <button id="aspect_destinia_create" class="menu_button">Create Profile</button>
                                 <button id="aspect_destinia_attach_current" class="menu_button">Attach Current Chat</button>
-                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
+                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Messages</button>
                             </div>
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
                                 <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Profile</button>
@@ -2101,14 +2349,14 @@ function buildSettingsHtml() {
                                 <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Story Progression</label>
+                                <label class="aspect-destinia-label">Plot Progression</label>
                                 <select id="aspect_destinia_mode">
-                                    <option value="objectives">Objective-based rules</option>
-                                    <option value="hints">Simple completion hints</option>
+                                    <option value="objectives">Objective-based Rules</option>
+                                    <option value="hints">Hint-based Rules</option>
                                 </select>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Recent Messages Window (Evaluator Context)</label>
+                                <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
                             <div class="aspect-destinia-field">
@@ -2143,7 +2391,7 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-actions">
                             <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
                             <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
-                            <button id="aspect_destinia_reset_beat" class="menu_button">First Plot Point</button>
+                            <button id="aspect_destinia_reset_plot_point" class="menu_button">First Plot Point</button>
                         </div>
                     </div>
 
@@ -2153,17 +2401,31 @@ function buildSettingsHtml() {
                     </div>
 
                     <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-field">
-                            <div class="aspect-destinia-label-row">
-                                <div class="aspect-destinia-section-title">Timeline JSON</div>
-                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
-                            </div>
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <div class="aspect-destinia-section-title">Timeline</div>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
+                                </div>
                             <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         </div>
                         <div class="aspect-destinia-actions">
                             <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Timeline Presets</label>
+                            <div class="aspect-destinia-entry-picker-row">
+                                <div class="aspect-destinia-select-wrap">
+                                    <select id="aspect_destinia_timeline_preset_select"></select>
+                                    <span class="aspect-destinia-select-arrow">▾</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_timeline_preset_save" class="menu_button menu_button_primary">Save Preset</button>
+                            <button id="aspect_destinia_timeline_preset_duplicate" class="menu_button">Duplicate Preset</button>
+                            <button id="aspect_destinia_timeline_preset_delete" class="menu_button menu_button_danger">Delete Preset</button>
                         </div>
                     </div>
 
@@ -2270,6 +2532,7 @@ function bindUI() {
         const profile = getProfileById(profileId);
         profileToForm(profile);
     });
+    $('#aspect_destinia_timeline_preset_select').on('change', selectTimelinePreset);
 
     bindDebouncedButtonAction('#aspect_destinia_create', createProfileAttachedToCurrentChat);
     bindDebouncedButtonAction('#aspect_destinia_rename', renameDisplayedProfile, { showBusy: false, debounceMs: 120 });
@@ -2284,10 +2547,13 @@ function bindUI() {
     bindDebouncedButtonAction('#aspect_destinia_timeline_export', exportTimelineToFile);
     bindDebouncedButtonAction('#aspect_destinia_timeline_import', () => $('#aspect_destinia_timeline_import_file').trigger('click'), { showBusy: false });
     $('#aspect_destinia_timeline_import_file').on('change', importTimelineFromFile);
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_save', () => saveTimelinePresetFromEditor(), { debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_duplicate', () => saveTimelinePresetFromEditor({ duplicate: true }), { debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_delete', deleteSelectedTimelinePreset, { debounceMs: 120 });
 
-    bindDebouncedButtonAction('#aspect_destinia_prev', () => stepBeat(-1), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_next', () => stepBeat(1), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_reset_beat', resetCurrentBeatToFirst, { showBusy: false, debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_prev', () => stepPlotPoint(-1), { showBusy: false, debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_next', () => stepPlotPoint(1), { showBusy: false, debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_reset_plot_point', resetCurrentPlotPointToFirst, { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_clear_chat', clearCurrentChatMessages);
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
