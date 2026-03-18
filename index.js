@@ -2311,6 +2311,10 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
+                                <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
+                            </div>
+
+                            <div class="aspect-destinia-field aspect-destinia-grow">
                                 <label class="aspect-destinia-label">Profiles</label>
                                 <div class="aspect-destinia-entry-picker-row">
                                     <div class="aspect-destinia-select-wrap">
@@ -2343,69 +2347,15 @@ function buildSettingsHtml() {
                                 <button id="aspect_destinia_import" class="menu_button">Import Profile</button>
                             </div>
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
-                        </div>
-                    </div>
 
-                    <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-grid three">
-                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-Advance Plot After Objective Threshold Met</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Timeline Deviation</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
+                                <label class="aspect-destinia-label">Evaluator Connection Profile</label>
+                                <select id="aspect_destinia_eval_connection"></select>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Auto-Resolve Deviation</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
+                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
+                                <select id="aspect_destinia_eval_preset"></select>
                             </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Progression</label>
-                                <select id="aspect_destinia_mode">
-                                    <option value="objectives">Objective-based Rules</option>
-                                    <option value="hints">Hint-based Rules</option>
-                                </select>
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
-                                <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
-                            </div>
-                        </div>
-
-                        <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
-
-                        <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Evaluator Connection Profile</label>
-                            <select id="aspect_destinia_eval_connection"></select>
-                        </div>
-                        <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
-                            <select id="aspect_destinia_eval_preset"></select>
-                        </div>
-
-                        <div class="aspect-destinia-grid three sliders">
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Strictness <span id="aspect_destinia_strictness_value"></span></label>
-                                <input id="aspect_destinia_strictness" type="range" min="0" max="1" step="0.01" />
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Pacing Bias <span id="aspect_destinia_pacing_value"></span></label>
-                                <input id="aspect_destinia_pacing" type="range" min="0" max="1" step="0.01" />
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Transition Threshold <span id="aspect_destinia_threshold_value"></span></label>
-                                <input id="aspect_destinia_threshold" type="range" min="0.5" max="0.95" step="0.01" />
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold <span id="aspect_destinia_objective_threshold_value"></span></label>
-                                <input id="aspect_destinia_objective_threshold" type="range" min="0.5" max="1" step="0.05" />
-                            </div>
-                        </div>
-
-                        <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
-                            <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
-                            <button id="aspect_destinia_reset_plot_point" class="menu_button">First Plot Point</button>
                         </div>
                     </div>
 
@@ -2417,13 +2367,8 @@ function buildSettingsHtml() {
                             </div>
                             <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         </div>
-                        <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
-                            <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
-                            <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
-                        </div>
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Timeline Presets</label>
+                            <label class="aspect-destinia-label">Timeline Preset</label>
                             <div class="aspect-destinia-entry-picker-row">
                                 <div class="aspect-destinia-select-wrap">
                                     <select id="aspect_destinia_timeline_preset_select"></select>
@@ -2436,6 +2381,63 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_preset_save" class="menu_button menu_button_primary">Save Preset</button>
                             <button id="aspect_destinia_timeline_preset_duplicate" class="menu_button">Duplicate Preset</button>
                             <button id="aspect_destinia_timeline_preset_delete" class="menu_button menu_button_danger">Delete Preset</button>
+                        </div>
+                        <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
+                            <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
+                            <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid three">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Timeline Deviation</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Auto-Resolve Deviation</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
+                            </div>
+                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Objective Auto-Advance After Threshold</label>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold <span id="aspect_destinia_objective_threshold_value"></span></label>
+                                <input id="aspect_destinia_objective_threshold" type="range" min="0.5" max="1" step="0.05" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Transition Threshold <span id="aspect_destinia_threshold_value"></span></label>
+                                <input id="aspect_destinia_threshold" type="range" min="0.5" max="0.95" step="0.01" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Progression</label>
+                                <select id="aspect_destinia_mode">
+                                    <option value="objectives">Objective-based Rules</option>
+                                    <option value="hints">Hint-based Rules</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_reset_plot_point" class="menu_button">First Plot Point</button>
+                            <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
+                            <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
+                        </div>
+
+                        <div class="aspect-destinia-grid three sliders">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Alignment Strictness <span id="aspect_destinia_strictness_value"></span></label>
+                                <input id="aspect_destinia_strictness" type="range" min="0" max="1" step="0.01" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Progression Aggressiveness <span id="aspect_destinia_pacing_value"></span></label>
+                                <input id="aspect_destinia_pacing" type="range" min="0" max="1" step="0.01" />
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
+                                <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
+                            </div>
+                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
                         </div>
                     </div>
 
