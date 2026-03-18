@@ -722,40 +722,28 @@ function getSillyTavernChatPresets() {
     return [];
 }
 
-function getActiveEvaluatorConnectionLabel(profile) {
-    const selectedValue = String(profile?.llmConnectionProfile || '').trim();
-    if (!selectedValue) {
-        const ctx = getCtx();
-        return String(
-            ctx.activeConnectionProfile
-            || ctx.active_connection_profile
-            || ctx.currentConnectionProfile
-            || ctx.current_connection_profile
-            || 'Active Connection Profile'
-        ).trim() || 'Active Connection Profile';
-    }
-
-    const match = getSillyTavernConnectionProfiles().find(item => item.value === selectedValue);
-    return match?.label || selectedValue;
+function getCurrentEvaluatorConnectionLabel() {
+    const ctx = getCtx();
+    return String(
+        ctx.activeConnectionProfile
+        || ctx.active_connection_profile
+        || ctx.currentConnectionProfile
+        || ctx.current_connection_profile
+        || 'Active Connection Profile'
+    ).trim() || 'Active Connection Profile';
 }
 
-function getActiveEvaluatorPresetLabel(profile) {
-    const selectedValue = String(profile?.llmPreset || '').trim();
-    if (!selectedValue) {
-        const ctx = getCtx();
-        return String(
-            ctx.activeChatCompletionPreset
-            || ctx.active_chat_completion_preset
-            || ctx.currentChatCompletionPreset
-            || ctx.current_chat_completion_preset
-            || ctx.activePreset
-            || ctx.active_preset
-            || 'Chat Completion Preset'
-        ).trim() || 'Chat Completion Preset';
-    }
-
-    const match = getSillyTavernChatPresets().find(item => item.value === selectedValue);
-    return match?.label || selectedValue;
+function getCurrentEvaluatorPresetLabel() {
+    const ctx = getCtx();
+    return String(
+        ctx.activeChatCompletionPreset
+        || ctx.active_chat_completion_preset
+        || ctx.currentChatCompletionPreset
+        || ctx.current_chat_completion_preset
+        || ctx.activePreset
+        || ctx.active_preset
+        || 'Chat Completion Preset'
+    ).trim() || 'Chat Completion Preset';
 }
 
 function findNestedCollectionsByPathKeywords(root, requiredKeywords = []) {
@@ -805,13 +793,13 @@ function renderEvaluatorModelOptions(profile) {
     const profiles = getSillyTavernConnectionProfiles();
     const presets = getSillyTavernChatPresets();
 
-    connectionSelect.empty().append(`<option value="">Use Current ${escapeHtml(getActiveEvaluatorConnectionLabel(profile))}</option>`);
+    connectionSelect.empty().append(`<option value="">Use Current ${escapeHtml(getCurrentEvaluatorConnectionLabel())}</option>`);
     for (const item of profiles) {
         connectionSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
     connectionSelect.val(profile?.llmConnectionProfile || '');
 
-    presetSelect.empty().append(`<option value="">Use Current ${escapeHtml(getActiveEvaluatorPresetLabel(profile))}</option>`);
+    presetSelect.empty().append(`<option value="">Use Current ${escapeHtml(getCurrentEvaluatorPresetLabel())}</option>`);
     for (const item of presets) {
         presetSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
@@ -1650,6 +1638,30 @@ function renameDisplayedProfile() {
     toastr.success(`${MODULE_NAME}: renamed profile.`);
 }
 
+function renameSelectedTimelinePreset() {
+    const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
+    const preset = getTimelinePresetById(presetId);
+    if (!preset) {
+        toastr.warning(`${MODULE_NAME}: select a timeline preset to rename.`);
+        return;
+    }
+
+    const nextName = window.prompt('Rename timeline preset', preset.name || 'Timeline Preset');
+    if (nextName === null) return;
+
+    const trimmedName = String(nextName || '').trim();
+    if (!trimmedName) {
+        toastr.warning(`${MODULE_NAME}: preset name cannot be empty.`);
+        return;
+    }
+
+    preset.name = trimmedName;
+    saveSettings();
+    renderTimelinePresetOptions(getDisplayedProfile() || getActiveProfile());
+    $('#aspect_destinia_timeline_preset_select').val(preset.id);
+    toastr.success(`${MODULE_NAME}: renamed timeline preset.`);
+}
+
 function profileToForm(profile) {
     if (!profile) {
         clearForm();
@@ -2336,7 +2348,6 @@ function buildSettingsHtml() {
 
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
-                            <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
                             <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-Advance Plot After Objective Threshold Met</label>
                             <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
                             <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
@@ -2359,14 +2370,17 @@ function buildSettingsHtml() {
                                 <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Evaluator Connection Profile</label>
-                                <select id="aspect_destinia_eval_connection"></select>
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
-                                <select id="aspect_destinia_eval_preset"></select>
-                            </div>
+                        </div>
+
+                        <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
+
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Evaluator Connection Profile</label>
+                            <select id="aspect_destinia_eval_connection"></select>
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
+                            <select id="aspect_destinia_eval_preset"></select>
                         </div>
 
                         <div class="aspect-destinia-grid three sliders">
@@ -2396,16 +2410,11 @@ function buildSettingsHtml() {
                     </div>
 
                     <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-section-title">Status</div>
-                        <div id="aspect_destinia_status"></div>
-                    </div>
-
-                    <div class="aspect-destinia-card">
-                            <div class="aspect-destinia-field">
-                                <div class="aspect-destinia-label-row">
-                                    <div class="aspect-destinia-section-title">Timeline</div>
-                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
-                                </div>
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <div class="aspect-destinia-section-title">Timeline</div>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
+                            </div>
                             <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         </div>
                         <div class="aspect-destinia-actions">
@@ -2420,6 +2429,7 @@ function buildSettingsHtml() {
                                     <select id="aspect_destinia_timeline_preset_select"></select>
                                     <span class="aspect-destinia-select-arrow">▾</span>
                                 </div>
+                                <button id="aspect_destinia_timeline_preset_rename" class="menu_button aspect-destinia-icon-button" title="Rename timeline preset" aria-label="Rename timeline preset"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
                             </div>
                         </div>
                         <div class="aspect-destinia-actions">
@@ -2427,6 +2437,11 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_preset_duplicate" class="menu_button">Duplicate Preset</button>
                             <button id="aspect_destinia_timeline_preset_delete" class="menu_button menu_button_danger">Delete Preset</button>
                         </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Status</div>
+                        <div id="aspect_destinia_status"></div>
                     </div>
 
                     <div class="aspect-destinia-card">
@@ -2536,6 +2551,7 @@ function bindUI() {
 
     bindDebouncedButtonAction('#aspect_destinia_create', createProfileAttachedToCurrentChat);
     bindDebouncedButtonAction('#aspect_destinia_rename', renameDisplayedProfile, { showBusy: false, debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_rename', renameSelectedTimelinePreset, { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_duplicate', duplicateSelectedProfile);
     bindDebouncedButtonAction('#aspect_destinia_delete', deleteSelectedProfile);
     bindDebouncedButtonAction('#aspect_destinia_attach_current', attachSelectedProfileToCurrentChat);
