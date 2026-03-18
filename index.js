@@ -1958,7 +1958,7 @@ function buildSettingsHtml() {
             <div class="inline-drawer-content">
                 <div class="aspect-destinia-panel">
                     <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-toolbar aspect-destinia-toolbar-top">
+                        <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
                                 <label class="aspect-destinia-label">Profiles</label>
@@ -1967,26 +1967,32 @@ function buildSettingsHtml() {
                                         <select id="aspect_destinia_profile_select"></select>
                                         <span class="aspect-destinia-select-arrow">▾</span>
                                     </div>
-                                    <button id="aspect_destinia_rename" class="menu_button aspect-destinia-icon-button" title="Rename profile" aria-label="Rename profile">✏️</button>
+                                    <button id="aspect_destinia_rename" class="menu_button aspect-destinia-icon-button" title="Rename profile" aria-label="Rename profile"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
                                 </div>
                             </div>
-                            <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save</button>
-                            <button id="aspect_destinia_create" class="menu_button">Create Profile for Current Chat</button>
-                            <button id="aspect_destinia_attach_current" class="menu_button">Use Current Chat</button>
-                            <button id="aspect_destinia_duplicate" class="menu_button">Duplicate</button>
-                            <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete</button>
-                            <button id="aspect_destinia_export" class="menu_button">Export</button>
-                            <button id="aspect_destinia_import" class="menu_button">Import</button>
-                            <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
-                        </div>
 
-                        <div class="aspect-destinia-grid two">
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Attached Chat</label>
+                            <div class="aspect-destinia-field aspect-destinia-grow">
+                                <label class="aspect-destinia-label">Current Chat</label>
                                 <div class="aspect-destinia-inline">
                                     <select id="aspect_destinia_chat_select"></select>
                                 </div>
                             </div>
+
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                                <button id="aspect_destinia_create" class="menu_button">Create Profile for Current Chat</button>
+                                <button id="aspect_destinia_attach_current" class="menu_button">Attach Current Chat</button>
+                            </div>
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                                <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Profile</button>
+                                <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Profile</button>
+                                <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Profile</button>
+                            </div>
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                                <button id="aspect_destinia_export" class="menu_button">Export Profile</button>
+                                <button id="aspect_destinia_import" class="menu_button">Import Profile</button>
+                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
+                            </div>
+                            <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
 
@@ -2048,7 +2054,6 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_prev" class="menu_button">Previous Plot Point</button>
                             <button id="aspect_destinia_next" class="menu_button">Next Plot Point</button>
                             <button id="aspect_destinia_reset_beat" class="menu_button">First Plot Point</button>
-                            <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
                         </div>
                     </div>
 
