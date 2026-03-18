@@ -654,16 +654,19 @@ function renderEvaluatorModelOptions(profile) {
 }
 
 async function generateQuietPromptWithEvaluatorModel(ctx, profile, quietPrompt) {
+    const connectionProfile = String(profile?.llmConnectionProfile || '').trim();
+    const chatCompletionPreset = String(profile?.llmPreset || '').trim();
+
+    if (!connectionProfile && !chatCompletionPreset) {
+        return ctx.generateQuietPrompt(quietPrompt);
+    }
+
     const payload = {
         quietPrompt,
-        connectionProfile: profile?.llmConnectionProfile || undefined,
-        connection_profile: profile?.llmConnectionProfile || undefined,
-        chatCompletionPreset: profile?.llmPreset || undefined,
-        chat_completion_preset: profile?.llmPreset || undefined,
-        preset: profile?.llmPreset || undefined
+        connectionProfile,
+        chatCompletionPreset
     };
 
-    Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
     return ctx.generateQuietPrompt(payload);
 }
 
