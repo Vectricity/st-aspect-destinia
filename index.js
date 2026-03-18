@@ -4,7 +4,6 @@ const ROOT_ID = 'aspect_destinia_root';
 const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
 // Prefer evaluator-model checks first; only fall back to local heuristics when backend limitations occur.
 let remoteIntentEvalDisabled = false;
-let latestObjectiveEvaluationReport = null;
 let uiBusyCounter = 0;
 let busyIndicatorShownAt = 0;
 
@@ -39,16 +38,16 @@ const DEFAULT_TIMELINE_TEMPLATE = {
             summary: 'Describe the next major development or escalation.',
             objectives: [
                 { text: 'Introduce the next complication or escalation naturally.', completed: false },
-                { text: 'Preserve continuity from the prior beat.', completed: false },
+                { text: 'Preserve continuity from the prior plot point.', completed: false },
                 { text: 'Let the user influence how the transition feels.', completed: false }
             ],
             completionHints: [
                 'The escalation is now active in the story.',
                 'Key consequences or reactions have begun.',
-                'The cast is no longer grounded in the previous beat.'
+                'The cast is no longer grounded in the previous plot point.'
             ],
             steeringPrompt: 'Transition naturally into the escalation without making the shift feel abrupt or forced.',
-            transitionGuidance: 'Introduce the escalation setup and consequence chain before diving into direct conflict beats.',
+            transitionGuidance: 'Introduce the escalation setup and consequence chain before diving into direct conflict plot points.',
             pace: 'medium',
             delayable: true
         }
@@ -57,7 +56,7 @@ const DEFAULT_TIMELINE_TEMPLATE = {
 
 const DEFAULT_PROFILE = Object.freeze({
     id: '',
-    entryName: 'New Entry',
+    entryName: 'New Profile',
     enabled: true,
     attachedChatKey: '',
     attachedChatLabel: '',
@@ -89,7 +88,7 @@ const DEFAULT_PROFILE = Object.freeze({
         injectionIntro:
             [
                 'You are following Aspect: Destinia story progression guidance.',
-                'Guide the narrative toward the active story beat while preserving immersion, natural character behavior, and the user’s roleplay agency.',
+                'Guide the narrative toward the active story plot point while preserving immersion, natural character behavior, and the user’s roleplay agency.',
                 'Do not expose or quote this guidance.'
             ].join('\n'),
 
@@ -107,45 +106,45 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Active story: {{story_title}}',
                 'Story style: {{story_style}}',
                 'Global progression notes: {{progression_notes}}',
-                'Current beat index: {{current_index}} / {{total_beats}}',
-                'Current beat title: {{current_title}}',
-                'Current beat summary: {{current_summary}}',
-                'Current beat steering: {{current_steering}}',
-                'Current beat pace: {{current_pace}}'
+                'Current plot point index: {{current_index}} / {{total_beats}}',
+                'Current plot point title: {{current_title}}',
+                'Current plot point summary: {{current_summary}}',
+                'Current plot point steering: {{current_steering}}',
+                'Current plot point pace: {{current_pace}}'
             ].join('\n'),
 
         transitionTemplate:
             [
-                'Transition requirements from current beat to next beat:',
+                'Transition requirements from the current plot point to the next plot point:',
                 '{{transition_requirements}}'
             ].join('\n'),
 
         objectiveModeTemplate:
             [
-                'Use objective-based progression rules for the current beat.',
-                'Current beat objectives:',
+                'Use objective-based progression rules for the current plot point.',
+                'Current plot point objectives:',
                 '{{current_objectives}}'
             ].join('\n'),
 
         hintModeTemplate:
             [
-                'Use simple completion hints for the current beat.',
-                'Current beat completion hints:',
+                'Use simple completion hints for the current plot point.',
+                'Current plot point completion hints:',
                 '{{current_hints}}'
             ].join('\n'),
 
         nextBeatTemplate:
             [
-                'Next beat title: {{next_title}}',
-                'Next beat summary: {{next_summary}}',
-                'Only foreshadow or transition toward it when the current beat is ready and the user’s roleplay direction supports it.'
+                'Next plot point title: {{next_title}}',
+                'Next plot point summary: {{next_summary}}',
+                'Only foreshadow or transition toward it when the current plot point is ready and the user’s roleplay direction supports it.'
             ].join('\n'),
 
         lingerInstruction:
-            'Current user-direction signal: remain within the present beat. Let the current scene breathe, deepen, and unfold without prematurely transitioning.',
+            'Current user-direction signal: remain within the present plot point. Let the current scene breathe, deepen, and unfold without prematurely transitioning.',
 
         advanceInstruction:
-            'Current user-direction signal: allow movement toward the next beat. Transition smoothly through natural consequences rather than abrupt narration.',
+            'Current user-direction signal: allow movement toward the next plot point. Transition smoothly through natural consequences rather than abrupt narration.',
 
         pacingInstruction:
             [
@@ -162,9 +161,9 @@ const DEFAULT_PROFILE = Object.freeze({
         evaluatorPrompt:
             [
                 'You are evaluating roleplay progression for a story timeline controller.',
-                'Read the recent chat and determine whether the USER is signaling that the story should stay on the current beat or may transition toward the next beat.',
+                'Read the recent chat and determine whether the USER is signaling that the story should stay on the current plot point or may transition toward the next plot point.',
                 'Only mark objectives complete when the USER meaningfully demonstrates progress. Do not mark completion based only on assistant/NPC narration or dialogue.',
-                'Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-beat task, or is engaged in an important unresolved conversation. Ordinary banter or casual dialogue alone is not lingering intent.',
+                'Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-plot-point task, or is engaged in an important unresolved conversation. Ordinary banter or casual dialogue alone is not lingering intent.',
                 '{{objective_completion_guidance}}',
                 'Return ONLY valid JSON with these keys:',
                 '{',
@@ -179,56 +178,16 @@ const DEFAULT_PROFILE = Object.freeze({
                 'Only set objective_completion items to true when the objective is complete based on the recent chat.',
                 '',
                 'Story title: {{story_title}}',
-                'Current beat: {{current_title}}',
-                'Current beat summary: {{current_summary}}',
-                'Current beat objectives: {{current_objectives_inline}}',
-                'Current beat objective completion booleans: {{current_objective_completion_inline}}',
-                'Current beat completion hints: {{current_hints_inline}}',
-                'Next beat: {{next_title}}',
+                'Current plot point: {{current_title}}',
+                'Current plot point summary: {{current_summary}}',
+                'Current plot point objectives: {{current_objectives_inline}}',
+                'Current plot point objective completion booleans: {{current_objective_completion_inline}}',
+                'Current plot point completion hints: {{current_hints_inline}}',
+                'Next plot point: {{next_title}}',
                 'Recent USER-only chat (primary evidence for objective completion):',
                 '{{recent_user_chat}}',
                 'Recent chat:',
                 '{{recent_chat}}'
-            ].join('\n'),
-
-        objectiveTemplateEvaluatorPrompt:
-            [
-                'You are reviewing story-beat objectives for quality and actionability.',
-                'Evaluate each objective and decide whether it is problematic for practical in-scene tracking.',
-                'Mark problematic when an objective is vague, too broad, overloaded with multiple actions, or not directly observable.',
-                'For problematic objectives, include 1-3 rewritten objective lines that are concrete and measurable in scene play.',
-                'Return ONLY valid JSON with this schema:',
-                '{',
-                '  "evaluations": [',
-                '    {',
-                '      "point_index": 0,',
-                '      "objective_index": 0,',
-                '      "is_problem": true,',
-                '      "issues": ["vague", "complicated"],',
-                '      "reason": "short reason",',
-                '      "suggested_rewrites": ["objective line"]',
-                '    }',
-                '  ]',
-                '}',
-                'Allowed issue labels: vague, complicated, generalized, not_observable.',
-                'If objective is good, set is_problem to false and suggested_rewrites to [].',
-                'Timeline JSON:',
-                '{{timeline_json}}'
-            ].join('\n'),
-
-        objectiveTemplateFixerPrompt:
-            [
-                'Rewrite the objective below into concrete, observable beat objectives.',
-                'Return ONLY valid JSON:',
-                '{ "rewrites": ["objective 1", "objective 2"] }',
-                'Rules:',
-                '- Keep story intent aligned with beat title and beat summary.',
-                '- Prefer one clear action per objective line.',
-                '- 1 to 3 rewrites only.',
-                '- Avoid vague terms like "improve", "handle", or "progress" without specifics.',
-                'Beat title: {{beat_title}}',
-                'Beat summary: {{beat_summary}}',
-                'Original objective: {{objective_text}}'
             ].join('\n')
     }
 });
@@ -238,6 +197,54 @@ const DEFAULT_SETTINGS = Object.freeze({
     knownChats: [],
     ui: {
         selectedProfileId: ''
+    }
+});
+
+const TEMPLATE_VALIDATION_RULES = Object.freeze({
+    aspect_destinia_timeline: {
+        type: 'json',
+        label: 'Timeline JSON'
+    },
+    aspect_destinia_prompt_current: {
+        type: 'template',
+        label: 'Current Plot Point Template',
+        requiredTokens: ['{{current_index}}', '{{total_beats}}', '{{current_title}}', '{{current_summary}}', '{{current_steering}}', '{{current_pace}}']
+    },
+    aspect_destinia_prompt_next: {
+        type: 'template',
+        label: 'Next Plot Point Template',
+        requiredTokens: ['{{next_title}}', '{{next_summary}}']
+    },
+    aspect_destinia_prompt_transition: {
+        type: 'template',
+        label: 'Transition Template',
+        requiredTokens: ['{{transition_requirements}}']
+    },
+    aspect_destinia_prompt_objectives: {
+        type: 'template',
+        label: 'Objective Mode Template',
+        requiredTokens: ['{{current_objectives}}']
+    },
+    aspect_destinia_prompt_hints: {
+        type: 'template',
+        label: 'Hint Mode Template',
+        requiredTokens: ['{{current_hints}}']
+    },
+    aspect_destinia_prompt_pacing: {
+        type: 'template',
+        label: 'Pacing Instruction',
+        requiredTokens: ['{{strictness}}', '{{pacing_bias}}']
+    },
+    aspect_destinia_prompt_objective_guidance: {
+        type: 'template',
+        label: 'Objective Completion Guidance',
+        requiredSnippets: ['objective_completion']
+    },
+    aspect_destinia_prompt_evaluator: {
+        type: 'template',
+        label: 'Evaluator Prompt',
+        requiredTokens: ['{{objective_completion_guidance}}', '{{story_title}}', '{{current_title}}', '{{current_summary}}', '{{current_objectives_inline}}', '{{current_objective_completion_inline}}', '{{current_hints_inline}}', '{{next_title}}', '{{recent_user_chat}}', '{{recent_chat}}'],
+        requiredSnippets: ['"decision"', '"confidence"', '"reason"', '"beat_complete"', '"user_wants_to_linger"', '"objective_completion"']
     }
 });
 
@@ -413,6 +420,59 @@ function safeParseTimeline(text) {
     }
 }
 
+function getProfileDisplayName(profile) {
+    const rawName = String(profile?.entryName || '').trim();
+    if (!rawName || /^entry for\s+/i.test(rawName)) {
+        return String(profile?.attachedChatLabel || '').trim() || 'Untitled Profile';
+    }
+    return rawName;
+}
+
+function hasBalancedTemplateDelimiters(value) {
+    const text = String(value || '');
+    const opens = (text.match(/\{\{/g) || []).length;
+    const closes = (text.match(/\}\}/g) || []).length;
+    return opens === closes;
+}
+
+function validateConfiguredField(fieldId) {
+    const config = TEMPLATE_VALIDATION_RULES[fieldId];
+    const el = document.getElementById(fieldId);
+    if (!config || !el) return null;
+
+    const value = String(el.value || '');
+    if (config.type === 'json') {
+        return safeParseTimeline(value) ? null : `${config.label} must be valid JSON and include plotPoints[].`;
+    }
+
+    if (!hasBalancedTemplateDelimiters(value)) {
+        return `${config.label} has unmatched template delimiters.`;
+    }
+
+    const missingTokens = (config.requiredTokens || []).filter(token => !value.includes(token));
+    if (missingTokens.length) {
+        return `${config.label} is missing required placeholders: ${missingTokens.join(', ')}`;
+    }
+
+    const missingSnippets = (config.requiredSnippets || []).filter(snippet => !value.includes(snippet));
+    if (missingSnippets.length) {
+        return `${config.label} is missing required content expected by the current extension version.`;
+    }
+
+    return null;
+}
+
+function updateFieldValidationIndicators() {
+    for (const fieldId of Object.keys(TEMPLATE_VALIDATION_RULES)) {
+        const icon = document.querySelector(`.aspect-destinia-warning-icon[data-validation-for="${fieldId}"]`);
+        if (!icon) continue;
+        const message = validateConfiguredField(fieldId);
+        icon.hidden = !message;
+        icon.setAttribute('title', message || '');
+        icon.setAttribute('aria-label', message || '');
+    }
+}
+
 function getCurrentBeat(profile) {
     const timeline = getActiveTimeline(profile);
     const points = timeline?.plotPoints || [];
@@ -455,7 +515,7 @@ function normalizeTimeline(timeline) {
         return {
             ...point,
             objectives,
-            transitionGuidance: transitionGuidance || 'Show the causal bridge from this beat into the next beat before the next beat action fully begins.'
+            transitionGuidance: transitionGuidance || 'Show the causal bridge from this plot point into the next plot point before the next plot point action fully begins.'
         };
     });
     return timeline;
@@ -463,68 +523,6 @@ function normalizeTimeline(timeline) {
 
 function getObjectiveCompletionThreshold(profile) {
     return clamp01(Number(profile?.objectiveAutoAdvanceThreshold ?? 0.8));
-}
-
-function classifyObjectiveIssues(objectiveText) {
-    const text = String(objectiveText || '').trim();
-    if (!text) {
-        return [{ type: 'vague', message: 'Objective text is empty.' }];
-    }
-
-    const issues = [];
-    const words = text.split(/\s+/).filter(Boolean);
-    const vagueStarts = /^(improve|handle|deal with|work on|progress|advance|develop|resolve)\b/i;
-    const vaguePhrases = /\b(something|somehow|etc\.?|and more|as needed|overall|in general|everything|anything|stuff)\b/i;
-    const broadPhrases = /\b(entire|all(?:\s+of)?|every(?:thing)?|the whole|worldbuilding|storyline|main plot|character development|relationships|narrative arc)\b/i;
-    const splitSignals = /\b(and|then|while|meanwhile|plus|also|before|after)\b/i;
-    const measurableActionSignal = /\b(show|reveal|establish|decide|confirm|identify|choose|confront|admit|discover|resolve|agree|refuse|learn|find|state|demonstrate)\b/i;
-
-    if (words.length > 24 || /[,;:].+[,;:]/.test(text) || (splitSignals.test(text) && words.length > 10)) {
-        issues.push({ type: 'complicated', message: 'Objective combines too many actions and should be split.' });
-    }
-    if (words.length < 4 || vagueStarts.test(text) || vaguePhrases.test(text) || !measurableActionSignal.test(text)) {
-        issues.push({ type: 'vague', message: 'Objective is too vague and should be more specific.' });
-    }
-    if (broadPhrases.test(text)) {
-        issues.push({ type: 'generalized', message: 'Objective is too broad/generalized for one beat.' });
-    }
-
-    return issues;
-}
-
-function buildObjectiveFixes(objectiveText) {
-    const source = String(objectiveText || '').trim();
-    if (!source) {
-        return ['Define one concrete, observable action for this beat.'];
-    }
-
-    const normalizeSentence = (text) => text
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^[a-z]/, c => c.toUpperCase())
-        .replace(/[.!?]*$/g, '.');
-
-    const splitCandidates = source
-        .split(/\s*;\s*/)
-        .map(part => part.trim())
-        .filter(Boolean);
-
-    const actionableVerb = /\b(establish|introduce|surface|create|allow|show|reveal|confirm|decide|identify|choose|confront|admit|discover|resolve|agree|refuse|learn|find|state|demonstrate|deepen|highlight)\b/i;
-    const clauses = splitCandidates.length > 1 ? splitCandidates : [source];
-
-    return clauses
-        .map((clause) => {
-            const compact = clause.replace(/\s+/g, ' ').trim();
-            if (!compact) return null;
-
-            if (compact.split(/\s+/).length < 5 || !actionableVerb.test(compact)) {
-                return normalizeSentence(`Show one concrete in-scene action that demonstrates: ${compact.replace(/[.!?]+$/g, '')}`);
-            }
-
-            return normalizeSentence(compact);
-        })
-        .filter(Boolean)
-        .slice(0, 3);
 }
 
 function getSillyTavernConnectionProfiles() {
@@ -768,320 +766,6 @@ function bindDebouncedButtonAction(selector, handler, options = {}) {
     });
 }
 
-function closeObjectiveReportModal() {
-    $('#aspect_destinia_objective_report_modal').removeClass('open').attr('aria-hidden', 'true');
-}
-
-function isDestiniaSettingsVisible() {
-    const root = document.getElementById(ROOT_ID);
-    if (!root) return false;
-
-    const style = window.getComputedStyle(root);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-
-    return root.getClientRects().length > 0;
-}
-
-function closeObjectiveReportModalIfSettingsHidden() {
-    if (!isDestiniaSettingsVisible()) {
-        closeObjectiveReportModal();
-    }
-}
-
-function setupObjectiveReportAutoClose() {
-    const settingsHost = document.getElementById('extensions_settings');
-    if (!settingsHost || settingsHost.dataset.aspectDestiniaReportObserverBound === '1') return;
-
-    settingsHost.dataset.aspectDestiniaReportObserverBound = '1';
-
-    const observer = new MutationObserver(() => {
-        closeObjectiveReportModalIfSettingsHidden();
-    });
-    observer.observe(settingsHost, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-
-    document.addEventListener('click', () => {
-        window.setTimeout(closeObjectiveReportModalIfSettingsHidden, 0);
-    }, true);
-
-    window.addEventListener('resize', closeObjectiveReportModalIfSettingsHidden);
-}
-
-function renderObjectiveEvaluationReportModal() {
-    const modal = $('#aspect_destinia_objective_report_modal');
-    const body = $('#aspect_destinia_objective_report_body');
-    if (!modal.length || !body.length) return;
-
-    const report = latestObjectiveEvaluationReport;
-    if (!report) {
-        body.html('<div class="aspect-destinia-objective-report-empty">No evaluation report yet. Run Evaluate Objectives first.</div>');
-        return;
-    }
-
-    if (!report.issues.length) {
-        body.html('<div class="aspect-destinia-objective-report-empty">No objective issues were found in the latest evaluation.</div>');
-        return;
-    }
-
-    const rows = report.issues.map((issue, reportIndex) => {
-        const issueLabels = issue.issues?.length
-            ? issue.issues.map(item => escapeHtml(item.type || item.message || 'issue')).join(', ')
-            : 'unspecified';
-        const reason = issue.reason ? `<div class="aspect-destinia-objective-report-reason">${escapeHtml(issue.reason)}</div>` : '';
-        return `
-            <div class="aspect-destinia-objective-report-item">
-                <div class="aspect-destinia-objective-report-item-head">
-                    <div>
-                        <strong>${escapeHtml(issue.beatTitle)}</strong>
-                        <div class="aspect-destinia-objective-report-meta">Objective #${issue.objectiveIdx + 1}</div>
-                    </div>
-                    <button class="menu_button aspect-destinia-icon-action" data-report-index="${reportIndex}" title="Fix this objective">🔧</button>
-                </div>
-                <div class="aspect-destinia-objective-report-objective">${escapeHtml(issue.objectiveText)}</div>
-                <div class="aspect-destinia-objective-report-meta">Issues: ${issueLabels}</div>
-                ${reason}
-            </div>
-        `;
-    }).join('');
-
-    body.html(rows);
-}
-
-function openObjectiveEvaluationReportModal() {
-    renderObjectiveEvaluationReportModal();
-    $('#aspect_destinia_objective_report_modal').addClass('open').attr('aria-hidden', 'false');
-}
-
-function setLatestObjectiveEvaluationReport(report) {
-    latestObjectiveEvaluationReport = report
-        ? {
-            parsed: report.parsed,
-            issues: Array.isArray(report.issues) ? report.issues : [],
-            source: report.source || 'heuristic',
-            timelineSnapshot: $('#aspect_destinia_timeline').val() || ''
-        }
-        : null;
-}
-
-async function evaluateTemplateObjectivesFromInput(notifyWhenHealthy = true) {
-    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
-    if (!parsed) {
-        toastr.error(`${MODULE_NAME}: cannot evaluate objectives because timeline JSON is invalid.`);
-        return null;
-    }
-
-    const issues = [];
-    const profile = getDisplayedProfile() || getActiveProfile();
-    let llmEvaluations = [];
-    let evaluationSource = 'heuristic';
-    if (profile) {
-        try {
-            const ctx = getCtx();
-            const prompt = replaceMacros(profile.prompts?.objectiveTemplateEvaluatorPrompt || '', {
-                timeline_json: JSON.stringify(parsed, null, 2)
-            });
-            const result = await generateQuietPromptWithEvaluatorModel(ctx, profile, prompt);
-            const parsedResult = parseJsonObject(result);
-            if (Array.isArray(parsedResult?.evaluations)) {
-                llmEvaluations = parsedResult.evaluations;
-                evaluationSource = 'llm';
-            }
-        } catch (err) {
-            console.warn(`[${MODULE_NAME}] objective evaluator model failed; using heuristic fallback`, err);
-        }
-    }
-
-    if (evaluationSource === 'llm') {
-        for (const row of llmEvaluations) {
-            const pointIdx = Number(row?.point_index);
-            const objectiveIdx = Number(row?.objective_index);
-            if (!Number.isInteger(pointIdx) || !Number.isInteger(objectiveIdx)) continue;
-
-            const point = parsed.plotPoints?.[pointIdx];
-            const objective = normalizeObjectiveItem(point?.objectives?.[objectiveIdx]);
-            if (!point || !objective.text) continue;
-
-            if (parseBooleanLike(row?.is_problem, false)) {
-                issues.push({
-                    pointIdx,
-                    objectiveIdx,
-                    beatTitle: point.title || `Beat ${pointIdx + 1}`,
-                    objectiveText: objective.text || '(empty objective)',
-                    issues: normalizeObjectiveEvaluationIssueLabels(row?.issues),
-                    reason: String(row?.reason || '').trim(),
-                    suggestedRewrites: Array.isArray(row?.suggested_rewrites)
-                        ? row.suggested_rewrites.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
-                        : []
-                });
-            }
-        }
-    } else {
-        parsed.plotPoints.forEach((point, pointIdx) => {
-            const objectives = Array.isArray(point.objectives) ? point.objectives.map(normalizeObjectiveItem) : [];
-            objectives.forEach((objective, objectiveIdx) => {
-                const objectiveIssues = classifyObjectiveIssues(objective.text);
-                if (objectiveIssues.length) {
-                    issues.push({
-                        pointIdx,
-                        objectiveIdx,
-                        beatTitle: point.title || `Beat ${pointIdx + 1}`,
-                        objectiveText: objective.text || '(empty objective)',
-                        issues: objectiveIssues,
-                        reason: 'Heuristic fallback evaluation.',
-                        suggestedRewrites: []
-                    });
-                }
-            });
-        });
-    }
-
-    const report = { parsed, issues, source: evaluationSource };
-    setLatestObjectiveEvaluationReport(report);
-
-    if (!issues.length) {
-        if (notifyWhenHealthy) {
-            toastr.success(`${MODULE_NAME}: no vague or overly complicated objectives detected.`);
-        }
-        return report;
-    }
-
-    const evalMethod = evaluationSource === 'llm' ? 'LLM evaluator' : 'heuristic fallback';
-    toastr.warning(`${MODULE_NAME}: found ${issues.length} objective issue(s) via ${evalMethod}. Open View Report to review details.`);
-    return report;
-}
-
-async function buildObjectiveFixesWithModel(profile, beat, objectiveText, seedSuggestions = []) {
-    if (seedSuggestions.length) {
-        return seedSuggestions.slice(0, 3);
-    }
-
-    try {
-        const ctx = getCtx();
-        const prompt = replaceMacros(profile.prompts?.objectiveTemplateFixerPrompt || '', {
-            beat_title: beat?.title || '',
-            beat_summary: beat?.summary || '',
-            objective_text: objectiveText || ''
-        });
-        const result = await generateQuietPromptWithEvaluatorModel(ctx, profile, prompt);
-        const parsed = parseJsonObject(result);
-        if (Array.isArray(parsed?.rewrites)) {
-            const rewrites = parsed.rewrites.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3);
-            if (rewrites.length) return rewrites;
-        }
-    } catch (err) {
-        console.warn(`[${MODULE_NAME}] objective fixer model failed; using heuristic fallback`, err);
-    }
-
-    return buildObjectiveFixes(objectiveText);
-}
-
-function getLatestObjectiveEvaluationReport() {
-    if (!latestObjectiveEvaluationReport) {
-        toastr.warning(`${MODULE_NAME}: run Evaluate Objectives first to create a report.`);
-        return null;
-    }
-
-    const currentTimeline = $('#aspect_destinia_timeline').val() || '';
-    if (latestObjectiveEvaluationReport.timelineSnapshot !== currentTimeline) {
-        toastr.warning(`${MODULE_NAME}: timeline changed since evaluation. Re-run Evaluate Objectives first.`);
-        return null;
-    }
-
-    return latestObjectiveEvaluationReport;
-}
-
-function removeFixedIssueFromLatestReport(reportIndex) {
-    if (!latestObjectiveEvaluationReport || !Array.isArray(latestObjectiveEvaluationReport.issues)) return;
-    latestObjectiveEvaluationReport.issues.splice(reportIndex, 1);
-}
-
-async function fixSingleIssueFromReport(issue, parsed, profile) {
-    const point = parsed.plotPoints?.[issue.pointIdx];
-    if (!point || !Array.isArray(point.objectives)) return false;
-
-    const original = normalizeObjectiveItem(point.objectives[issue.objectiveIdx]);
-    if (!original.text) return false;
-
-    const fixes = profile
-        ? await buildObjectiveFixesWithModel(profile, point, original.text, issue.suggestedRewrites || [])
-        : buildObjectiveFixes(original.text);
-    if (!fixes.length) return false;
-
-    const fixedEntries = fixes.map(text => ({ text, completed: false }));
-    point.objectives.splice(issue.objectiveIdx, 1, ...fixedEntries);
-    return true;
-}
-
-async function fixTemplateObjectivesFromInput() {
-    const report = getLatestObjectiveEvaluationReport();
-    if (!report) return;
-
-    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
-    if (!parsed) {
-        toastr.error(`${MODULE_NAME}: cannot fix objectives because timeline JSON is invalid.`);
-        return;
-    }
-
-    if (!report.issues.length) {
-        toastr.success(`${MODULE_NAME}: no objective fixes needed.`);
-        return;
-    }
-
-    const sortedIssues = [...report.issues].sort((a, b) => {
-        if (a.pointIdx !== b.pointIdx) return b.pointIdx - a.pointIdx;
-        return b.objectiveIdx - a.objectiveIdx;
-    });
-
-    let replacements = 0;
-    const profile = getDisplayedProfile() || getActiveProfile();
-    for (const issue of sortedIssues) {
-        const applied = await fixSingleIssueFromReport(issue, parsed, profile);
-        if (applied) replacements += 1;
-    }
-
-    $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
-    setLatestObjectiveEvaluationReport(null);
-    toastr.success(`${MODULE_NAME}: fixed ${replacements} objective(s) from the latest report.`);
-}
-
-async function fixSingleObjectiveFromReportIndex(reportIndex) {
-    const report = getLatestObjectiveEvaluationReport();
-    if (!report) return;
-
-    const issue = report.issues[reportIndex];
-    if (!issue) {
-        toastr.warning(`${MODULE_NAME}: selected report item is no longer available.`);
-        return;
-    }
-
-    const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
-    if (!parsed) {
-        toastr.error(`${MODULE_NAME}: cannot fix objective because timeline JSON is invalid.`);
-        return;
-    }
-
-    const profile = getDisplayedProfile() || getActiveProfile();
-    const applied = await fixSingleIssueFromReport(issue, parsed, profile);
-    if (!applied) {
-        toastr.warning(`${MODULE_NAME}: unable to fix the selected objective.`);
-        return;
-    }
-
-    $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
-    removeFixedIssueFromLatestReport(reportIndex);
-    renderObjectiveEvaluationReportModal();
-    toastr.success(`${MODULE_NAME}: fixed 1 objective from the latest report.`);
-}
-
-function formatObjectives(items) {
-    if (!Array.isArray(items) || items.length === 0) return '- none';
-    return items.map(item => {
-        const objective = normalizeObjectiveItem(item);
-        const marker = objective.completed ? '[x]' : '[ ]';
-        return `- ${marker} ${objective.text}`;
-    }).join('\n');
-}
-
-
 function replaceMacros(template, data) {
     return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
         return data[key] ?? '';
@@ -1113,7 +797,7 @@ function buildTemplateData(profile) {
         transition_requirements: current.transitionGuidance || 'No transition guidance provided.',
         current_hints_inline: Array.isArray(current.completionHints) ? current.completionHints.join('; ') : '',
         next_title: next.title || 'None',
-        next_summary: next.summary || 'No next beat.',
+        next_summary: next.summary || 'No next plot point.',
         strictness: Number(profile.strictness || 0).toFixed(2),
         pacing_bias: Number(profile.pacingBias || 0).toFixed(2)
     };
@@ -1155,9 +839,9 @@ function buildInjection(profile) {
 
     if (profile.autoResolveDeviation) {
         if (profile.timelineDeviationAllowed) {
-            chunks.push('Timeline Deviation Handling: ALLOWED. If the user meaningfully deviates from the planned timeline, adapt the timeline structure in a realistic way. Update beat order/details and objective wording so the revised timeline reflects what happened naturally in-scene. Keep changes coherent, causal, and narratively rational.');
+            chunks.push('Timeline Deviation Handling: ALLOWED. If the user meaningfully deviates from the planned timeline, adapt the timeline structure in a realistic way. Update plot point order/details and objective wording so the revised timeline reflects what happened naturally in-scene. Keep changes coherent, causal, and narratively rational.');
         } else {
-            chunks.push('Timeline Deviation Handling: NOT ALLOWED. If deviation pressure appears, naturally re-align the scene to the active timeline beat without abrupt railroading. Preserve immersion while steering events and character choices back toward current objectives and transition guidance.');
+            chunks.push('Timeline Deviation Handling: NOT ALLOWED. If deviation pressure appears, naturally re-align the scene to the active timeline plot point without abrupt railroading. Preserve immersion while steering events and character choices back toward current objectives and transition guidance.');
         }
     }
 
@@ -1246,7 +930,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
     const ctx = getCtx();
     const profile = getActiveProfile();
     if (!profile?.enabled) {
-        if (notify) toastr.warning(`${MODULE_NAME}: no enabled active entry for this chat.`);
+        if (notify) toastr.warning(`${MODULE_NAME}: no enabled active profile for this chat.`);
         return;
     }
     if (!force && !profile.autoAdvance && !profile.respectUserIntent) {
@@ -1256,7 +940,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
 
     const currentBeat = getCurrentBeat(profile);
     if (!currentBeat) {
-        if (notify) toastr.warning(`${MODULE_NAME}: no current beat is available.`);
+        if (notify) toastr.warning(`${MODULE_NAME}: no current plot point is available.`);
         return;
     }
 
@@ -1334,7 +1018,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             currentBeatObjectives: Array.isArray(currentBeat?.objectives) ? currentBeat.objectives : [],
             currentBeatHints: Array.isArray(currentBeat?.completionHints) ? currentBeat.completionHints : [],
             nextBeatTitle: getNextBeat(profile)?.title || 'None',
-            nextBeatSummary: getNextBeat(profile)?.summary || 'No next beat.'
+            nextBeatSummary: getNextBeat(profile)?.summary || 'No next plot point.'
         };
 
         const updatedBeat = getCurrentBeat(profile);
@@ -1363,7 +1047,7 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             profile.state.lastTransitionAt = Date.now();
             const newBeat = getCurrentBeat(profile);
             profile.state.lastIntentReason = `Advanced after ${trigger}: ${profile.state.lastIntentReason}`;
-            toastr.info(`${MODULE_NAME}: moved to "${newBeat?.title || 'next beat'}".`);
+            toastr.info(`${MODULE_NAME}: moved to "${newBeat?.title || 'next plot point'}".`);
         }
 
         persistProfile(profile);
@@ -1439,8 +1123,8 @@ function buildDiagnosticBoxHtml(profile) {
             </div>
             <div class="aspect-destinia-diagnostic-box">
             <div class="aspect-destinia-diagnostic-content">
-                <div><b class="aspect-destinia-diagnostic-sand">Current story beat:</b> ${escapeHtml(current?.title || 'None')}</div>
-                <div><b class="aspect-destinia-diagnostic-sand">Next story beat:</b> ${escapeHtml(next?.title || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Current story plot point:</b> ${escapeHtml(current?.title || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Next story plot point:</b> ${escapeHtml(next?.title || 'None')}</div>
                 <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
                 <div><b class="aspect-destinia-diagnostic-sand">Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
                 <details>
@@ -1693,7 +1377,7 @@ function createProfileAttachedToCurrentChat() {
 
     const profile = mergeDeep(structuredClone(DEFAULT_PROFILE), {
         id: makeId('entry'),
-        entryName: `Entry for ${chatLabel}`,
+        entryName: chatLabel || 'Current Chat',
         attachedChatKey: chatKey,
         attachedChatLabel: chatLabel
     });
@@ -1707,7 +1391,7 @@ function createProfileAttachedToCurrentChat() {
     saveChatMetadata();
 
     updateExtensionPrompt();
-    toastr.success(`${MODULE_NAME}: created entry and attached it to the current chat.`);
+    toastr.success(`${MODULE_NAME}: created profile and attached it to the current chat.`);
     refreshUI();
 }
 
@@ -1728,7 +1412,7 @@ function deleteSelectedProfile() {
     }
 
     saveSettings();
-    toastr.info(`${MODULE_NAME}: deleted entry "${profile.entryName}".`);
+    toastr.info(`${MODULE_NAME}: deleted profile "${getProfileDisplayName(profile)}".`);
     refreshUI();
 }
 
@@ -1738,12 +1422,12 @@ function duplicateSelectedProfile() {
 
     const copy = structuredClone(profile);
     copy.id = makeId('entry');
-    copy.entryName = `${profile.entryName} (Copy)`;
+    copy.entryName = `${getProfileDisplayName(profile)} (Copy)`;
 
     getProfiles().push(copy);
     setSelectedProfileId(copy.id);
     saveSettings();
-    toastr.success(`${MODULE_NAME}: duplicated entry.`);
+    toastr.success(`${MODULE_NAME}: duplicated profile.`);
     refreshUI();
 }
 
@@ -1762,7 +1446,7 @@ function attachSelectedProfileToCurrentChat() {
     saveChatMetadata();
 
     updateExtensionPrompt();
-    toastr.success(`${MODULE_NAME}: attached selected entry to the current chat.`);
+    toastr.success(`${MODULE_NAME}: attached selected profile to the current chat.`);
     refreshUI();
 }
 
@@ -1772,6 +1456,28 @@ function getDisplayedProfile() {
     return getProfileById(selectedId);
 }
 
+function renameDisplayedProfile() {
+    const profile = getDisplayedProfile();
+    if (!profile) {
+        toastr.warning(`${MODULE_NAME}: no selected profile to rename.`);
+        return;
+    }
+
+    const nextName = window.prompt('Rename profile', getProfileDisplayName(profile));
+    if (nextName === null) return;
+
+    const trimmedName = String(nextName || '').trim();
+    if (!trimmedName) {
+        toastr.warning(`${MODULE_NAME}: profile name cannot be empty.`);
+        return;
+    }
+
+    profile.entryName = trimmedName;
+    persistProfile(profile);
+    refreshUI();
+    toastr.success(`${MODULE_NAME}: renamed profile.`);
+}
+
 function profileToForm(profile) {
     if (!profile) {
         clearForm();
@@ -1779,7 +1485,6 @@ function profileToForm(profile) {
     }
 
     $('#aspect_destinia_profile_select').val(profile.id);
-    $('#aspect_destinia_entry_name').val(profile.entryName || 'Untitled Entry');
     $('#aspect_destinia_enabled').prop('checked', !!profile.enabled);
     $('#aspect_destinia_mode').val(profile.advancementMode || 'objectives');
     $('#aspect_destinia_auto_advance').prop('checked', !!profile.autoAdvance);
@@ -1808,14 +1513,12 @@ function profileToForm(profile) {
     $('#aspect_destinia_prompt_pacing').val(profile.prompts.pacingInstruction || '');
     $('#aspect_destinia_prompt_objective_guidance').val(profile.prompts.objectiveCompletionGuidance || '');
     $('#aspect_destinia_prompt_evaluator').val(profile.prompts.evaluatorPrompt || '');
-    $('#aspect_destinia_prompt_objective_template_evaluator').val(profile.prompts.objectiveTemplateEvaluatorPrompt || '');
-    $('#aspect_destinia_prompt_objective_template_fixer').val(profile.prompts.objectiveTemplateFixerPrompt || '');
 
     renderStatus(profile);
+    updateFieldValidationIndicators();
 }
 
 function clearForm() {
-    $('#aspect_destinia_entry_name').val('');
     $('#aspect_destinia_enabled').prop('checked', true);
     $('#aspect_destinia_mode').val('objectives');
     $('#aspect_destinia_auto_advance').prop('checked', true);
@@ -1832,6 +1535,19 @@ function clearForm() {
     $('#aspect_destinia_eval_preset').val('');
     $('#aspect_destinia_chat_select').val('');
     $('#aspect_destinia_timeline').val(JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
+    $('#aspect_destinia_prompt_intro').val(DEFAULT_PROFILE.prompts.injectionIntro || '');
+    $('#aspect_destinia_prompt_principles').val(DEFAULT_PROFILE.prompts.guidancePrinciples || '');
+    $('#aspect_destinia_prompt_current').val(DEFAULT_PROFILE.prompts.currentBeatTemplate || '');
+    $('#aspect_destinia_prompt_objectives').val(DEFAULT_PROFILE.prompts.objectiveModeTemplate || '');
+    $('#aspect_destinia_prompt_hints').val(DEFAULT_PROFILE.prompts.hintModeTemplate || '');
+    $('#aspect_destinia_prompt_next').val(DEFAULT_PROFILE.prompts.nextBeatTemplate || '');
+    $('#aspect_destinia_prompt_transition').val(DEFAULT_PROFILE.prompts.transitionTemplate || '');
+    $('#aspect_destinia_prompt_linger').val(DEFAULT_PROFILE.prompts.lingerInstruction || '');
+    $('#aspect_destinia_prompt_advance').val(DEFAULT_PROFILE.prompts.advanceInstruction || '');
+    $('#aspect_destinia_prompt_pacing').val(DEFAULT_PROFILE.prompts.pacingInstruction || '');
+    $('#aspect_destinia_prompt_objective_guidance').val(DEFAULT_PROFILE.prompts.objectiveCompletionGuidance || '');
+    $('#aspect_destinia_prompt_evaluator').val(DEFAULT_PROFILE.prompts.evaluatorPrompt || '');
+    updateFieldValidationIndicators();
 }
 
 function formToProfile(profile) {
@@ -1840,7 +1556,6 @@ function formToProfile(profile) {
         throw new Error('Timeline JSON must be valid and include plotPoints[].');
     }
 
-    profile.entryName = $('#aspect_destinia_entry_name').val().trim() || profile.entryName || 'Untitled Entry';
     profile.enabled = $('#aspect_destinia_enabled').is(':checked');
     profile.advancementMode = $('#aspect_destinia_mode').val();
     profile.autoAdvance = $('#aspect_destinia_auto_advance').is(':checked');
@@ -1876,8 +1591,6 @@ function formToProfile(profile) {
     profile.prompts.pacingInstruction = $('#aspect_destinia_prompt_pacing').val();
     profile.prompts.objectiveCompletionGuidance = $('#aspect_destinia_prompt_objective_guidance').val();
     profile.prompts.evaluatorPrompt = $('#aspect_destinia_prompt_evaluator').val();
-    profile.prompts.objectiveTemplateEvaluatorPrompt = $('#aspect_destinia_prompt_objective_template_evaluator').val();
-    profile.prompts.objectiveTemplateFixerPrompt = $('#aspect_destinia_prompt_objective_template_fixer').val();
 
     const totalBeats = profile.timeline.plotPoints.length;
     if (profile.state.currentIndex >= totalBeats) {
@@ -1911,11 +1624,11 @@ function downloadJsonToFile(payload, filenameLabel) {
 function exportDisplayedProfileToFile() {
     const profile = getDisplayedProfile();
     if (!profile) {
-        toastr.warning(`${MODULE_NAME}: no selected entry to export.`);
+        toastr.warning(`${MODULE_NAME}: no selected profile to export.`);
         return;
     }
 
-    downloadJsonToFile(profile, `${profile.entryName || 'destinia_entry'}_entry`);
+    downloadJsonToFile(profile, `${getProfileDisplayName(profile) || 'destinia_profile'}_profile`);
 }
 
 function exportTimelineToFile() {
@@ -1948,6 +1661,7 @@ function importTimelineFromFile(event) {
             }
 
             $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
+            updateFieldValidationIndicators();
             toastr.success(`${MODULE_NAME}: imported timeline JSON from file.`);
         } catch (err) {
             toastr.error(`${MODULE_NAME}: failed to import timeline (${err.message}).`);
@@ -1968,16 +1682,16 @@ function importProfileFromFile(event) {
             const parsed = JSON.parse(String(reader.result || '{}'));
             const imported = mergeDeep(structuredClone(DEFAULT_PROFILE), parsed || {});
             imported.id = makeId('destinia');
-            imported.entryName = `${imported.entryName || 'Imported Entry'} (Imported)`;
+            imported.entryName = `${getProfileDisplayName(imported) || 'Imported Profile'} (Imported)`;
             imported.timeline = normalizeTimeline(imported.timeline || safeParseTimeline(imported.timelineText) || structuredClone(DEFAULT_TIMELINE_TEMPLATE));
             imported.timelineText = JSON.stringify(imported.timeline, null, 2);
             getProfiles().push(imported);
             persistProfile(imported);
             setSelectedProfileId(imported.id);
             refreshUI();
-            toastr.success(`${MODULE_NAME}: imported entry from file.`);
+            toastr.success(`${MODULE_NAME}: imported profile from file.`);
         } catch (err) {
-            toastr.error(`${MODULE_NAME}: failed to import entry (${err.message}).`);
+            toastr.error(`${MODULE_NAME}: failed to import profile (${err.message}).`);
         } finally {
             $('#aspect_destinia_import_file').val('');
         }
@@ -2004,8 +1718,6 @@ const FIELD_DEFAULTS = {
     aspect_destinia_prompt_pacing: () => DEFAULT_PROFILE.prompts.pacingInstruction,
     aspect_destinia_prompt_objective_guidance: () => DEFAULT_PROFILE.prompts.objectiveCompletionGuidance,
     aspect_destinia_prompt_evaluator: () => DEFAULT_PROFILE.prompts.evaluatorPrompt,
-    aspect_destinia_prompt_objective_template_evaluator: () => DEFAULT_PROFILE.prompts.objectiveTemplateEvaluatorPrompt,
-    aspect_destinia_prompt_objective_template_fixer: () => DEFAULT_PROFILE.prompts.objectiveTemplateFixerPrompt,
 };
 
 function resetFieldToDefault(fieldId) {
@@ -2027,6 +1739,7 @@ function resetFieldToDefault(fieldId) {
     }
 
     updateSliderDisplays();
+    updateFieldValidationIndicators();
     toastr.info(`${MODULE_NAME}: reset field to default.`);
 }
 
@@ -2083,7 +1796,7 @@ async function clearCurrentChatMessages() {
 function saveDisplayedProfile() {
     const profile = getDisplayedProfile();
     if (!profile) {
-        toastr.warning(`${MODULE_NAME}: create an entry first.`);
+        toastr.warning(`${MODULE_NAME}: create a profile first.`);
         return;
     }
 
@@ -2097,7 +1810,7 @@ function saveDisplayedProfile() {
         }
 
         updateExtensionPrompt();
-        toastr.success(`${MODULE_NAME}: saved settings to "${profile.entryName}".`);
+        toastr.success(`${MODULE_NAME}: saved settings to "${getProfileDisplayName(profile)}".`);
         refreshUI();
     } catch (err) {
         toastr.error(`${MODULE_NAME}: ${err.message}`);
@@ -2109,10 +1822,10 @@ function resetCurrentBeatToFirst() {
     if (!profile) return;
     profile.state.currentIndex = 0;
     profile.state.lastIntentDecision = 'stay';
-    profile.state.lastIntentReason = 'Manually reset to the first beat.';
+    profile.state.lastIntentReason = 'Manually reset to the first plot point.';
     persistProfile(profile);
     updateExtensionPrompt();
-    toastr.info(`${MODULE_NAME}: reset current beat to the first plot point.`);
+    toastr.info(`${MODULE_NAME}: reset to the first plot point.`);
     refreshUI();
 }
 
@@ -2123,7 +1836,7 @@ function stepBeat(delta) {
     const timeline = getActiveTimeline(profile);
     const max = Math.max(0, (timeline?.plotPoints?.length || 1) - 1);
     profile.state.currentIndex = Math.max(0, Math.min(max, (profile.state.currentIndex || 0) + delta));
-    profile.state.lastIntentReason = `Manually adjusted current beat to index ${profile.state.currentIndex + 1}.`;
+    profile.state.lastIntentReason = `Manually adjusted current plot point to index ${profile.state.currentIndex + 1}.`;
     persistProfile(profile);
     updateExtensionPrompt();
     refreshUI();
@@ -2161,7 +1874,7 @@ function renderStatus(profile) {
                     const normalized = normalizeObjectiveItem(obj);
                     return `<div class="aspect-destinia-objective-row"><span class="aspect-destinia-objective-icon" aria-hidden="true">${normalized.completed ? '☑' : '☐'}</span> <span>${escapeHtml(normalized.text)} <code>${normalized.completed ? 'true' : 'false'}</code></span></div>`;
                 }).join('')
-                : '<div class="aspect-destinia-empty">No objectives on this beat.</div>'}
+                : '<div class="aspect-destinia-empty">No objectives on this plot point.</div>'}
         </div>
     `);
 }
@@ -2182,9 +1895,9 @@ function renderProfileOptions() {
     const activeId = getLinkedProfileIdForCurrentChat() || getSelectedProfileId() || profiles[0]?.id || '';
 
     select.empty();
-    select.append(`<option value="">-- Select Entry --</option>`);
+    select.append(`<option value="">-- Select Profile --</option>`);
     for (const profile of profiles) {
-        select.append(`<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.entryName)}</option>`);
+        select.append(`<option value="${escapeHtml(profile.id)}">${escapeHtml(getProfileDisplayName(profile))}</option>`);
     }
     select.val(activeId);
 }
@@ -2220,7 +1933,7 @@ function refreshUI() {
         profileToForm(profile);
     } else {
         clearForm();
-        $('#aspect_destinia_status').html('<div class="aspect-destinia-empty">No entry selected. Create one to bind story progression to this chat.</div>');
+        $('#aspect_destinia_status').html('<div class="aspect-destinia-empty">No profile selected. Create one to bind story progression to this chat.</div>');
     }
 
     updateSliderDisplays();
@@ -2245,38 +1958,39 @@ function buildSettingsHtml() {
             <div class="inline-drawer-content">
                 <div class="aspect-destinia-panel">
                     <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-toolbar">
+                        <div class="aspect-destinia-toolbar aspect-destinia-toolbar-top">
                             <div class="aspect-destinia-field aspect-destinia-grow">
-                                <label class="aspect-destinia-label">Entry</label>
+                                <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
+                                <label class="aspect-destinia-label">Profiles</label>
                                 <div class="aspect-destinia-entry-picker-row">
                                     <div class="aspect-destinia-select-wrap">
                                         <select id="aspect_destinia_profile_select"></select>
                                         <span class="aspect-destinia-select-arrow">▾</span>
                                     </div>
+                                    <button id="aspect_destinia_rename" class="menu_button aspect-destinia-icon-button" title="Rename profile" aria-label="Rename profile">✏️</button>
                                 </div>
-                                <input id="aspect_destinia_entry_name" type="text" placeholder="Entry name" />
                             </div>
                             <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save</button>
-                            <button id="aspect_destinia_create" class="menu_button">Create for Current Chat</button>
+                            <button id="aspect_destinia_create" class="menu_button">Create Profile for Current Chat</button>
+                            <button id="aspect_destinia_attach_current" class="menu_button">Use Current Chat</button>
                             <button id="aspect_destinia_duplicate" class="menu_button">Duplicate</button>
                             <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete</button>
                             <button id="aspect_destinia_export" class="menu_button">Export</button>
                             <button id="aspect_destinia_import" class="menu_button">Import</button>
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
-                    </div>
 
-                    <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Attached Chat</label>
                                 <div class="aspect-destinia-inline">
                                     <select id="aspect_destinia_chat_select"></select>
-                                    <button id="aspect_destinia_attach_current" class="menu_button">Use Current Chat</button>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
+                    <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
                             <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
                             <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Auto-Advance Plot After Objective Threshold Met</label>
@@ -2344,15 +2058,16 @@ function buildSettingsHtml() {
                     </div>
 
                     <div class="aspect-destinia-card">
-                        <div class="aspect-destinia-section-title">Timeline JSON</div>
-                        <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <div class="aspect-destinia-section-title">Timeline JSON</div>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
+                            </div>
+                            <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
+                        </div>
                         <div class="aspect-destinia-actions">
-                            <button id="aspect_destinia_validate" class="menu_button">Validate Timeline JSON</button>
                             <button id="aspect_destinia_timeline_export" class="menu_button">Export</button>
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
-                            <button id="aspect_destinia_eval_objectives" class="menu_button">Evaluate Objectives</button>
-                            <button id="aspect_destinia_fix_objectives" class="menu_button">Fix Objectives</button>
-                            <button id="aspect_destinia_open_objective_report" class="menu_button" title="Open latest objective evaluation report">View Report</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
                     </div>
@@ -2372,27 +2087,42 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Current Beat Template</label>
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Current Plot Point Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_current" hidden title="">⚠️</span>
+                                </div>
                                 <textarea id="aspect_destinia_prompt_current"></textarea>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Next Beat Template</label>
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Next Plot Point Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_next" hidden title="">⚠️</span>
+                                </div>
                                 <textarea id="aspect_destinia_prompt_next"></textarea>
                             </div>
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Transition Template</label>
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Transition Template</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_transition" hidden title="">⚠️</span>
+                            </div>
                             <textarea id="aspect_destinia_prompt_transition"></textarea>
                         </div>
 
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Objective Mode Template</label>
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Objective Mode Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_objectives" hidden title="">⚠️</span>
+                                </div>
                                 <textarea id="aspect_destinia_prompt_objectives"></textarea>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Hint Mode Template</label>
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Hint Mode Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_hints" hidden title="">⚠️</span>
+                                </div>
                                 <textarea id="aspect_destinia_prompt_hints"></textarea>
                             </div>
                         </div>
@@ -2409,42 +2139,31 @@ function buildSettingsHtml() {
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Pacing Instruction</label>
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Pacing Instruction</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_pacing" hidden title="">⚠️</span>
+                            </div>
                             <textarea id="aspect_destinia_prompt_pacing"></textarea>
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Objective Completion Guidance</label>
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Objective Completion Guidance</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_objective_guidance" hidden title="">⚠️</span>
+                            </div>
                             <textarea id="aspect_destinia_prompt_objective_guidance"></textarea>
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Evaluator Prompt</label>
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Evaluator Prompt</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_evaluator" hidden title="">⚠️</span>
+                            </div>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
-                        </div>
-
-                        <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Objective Template Evaluator Prompt</label>
-                            <textarea id="aspect_destinia_prompt_objective_template_evaluator" class="aspect-destinia-code tall"></textarea>
-                        </div>
-
-                        <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Objective Template Fixer Prompt</label>
-                            <textarea id="aspect_destinia_prompt_objective_template_fixer" class="aspect-destinia-code"></textarea>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div id="aspect_destinia_objective_report_modal" class="aspect-destinia-objective-report-modal" aria-hidden="true">
-        <div class="aspect-destinia-objective-report-dialog">
-            <div class="aspect-destinia-objective-report-header">
-                <div class="aspect-destinia-section-title">Objective Evaluation Report</div>
-                <button id="aspect_destinia_close_objective_report" class="menu_button" title="Close report">✕</button>
-            </div>
-            <div id="aspect_destinia_objective_report_body" class="aspect-destinia-objective-report-body"></div>
         </div>
     </div>`;
 }
@@ -2458,6 +2177,7 @@ function bindUI() {
     });
 
     bindDebouncedButtonAction('#aspect_destinia_create', createProfileAttachedToCurrentChat);
+    bindDebouncedButtonAction('#aspect_destinia_rename', renameDisplayedProfile, { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_duplicate', duplicateSelectedProfile);
     bindDebouncedButtonAction('#aspect_destinia_delete', deleteSelectedProfile);
     bindDebouncedButtonAction('#aspect_destinia_attach_current', attachSelectedProfileToCurrentChat);
@@ -2470,62 +2190,23 @@ function bindUI() {
     bindDebouncedButtonAction('#aspect_destinia_timeline_import', () => $('#aspect_destinia_timeline_import_file').trigger('click'), { showBusy: false });
     $('#aspect_destinia_timeline_import_file').on('change', importTimelineFromFile);
 
-    bindDebouncedButtonAction('#aspect_destinia_validate', () => {
-        const parsed = safeParseTimeline($('#aspect_destinia_timeline').val());
-        if (parsed) {
-            toastr.success(`${MODULE_NAME}: timeline JSON is valid.`);
-        } else {
-            toastr.error(`${MODULE_NAME}: invalid timeline JSON.`);
-        }
-    }, { showBusy: false });
-
-    bindDebouncedButtonAction('#aspect_destinia_eval_objectives', () => evaluateTemplateObjectivesFromInput(true));
-    bindDebouncedButtonAction('#aspect_destinia_fix_objectives', () => fixTemplateObjectivesFromInput());
-    bindDebouncedButtonAction('#aspect_destinia_open_objective_report', () => openObjectiveEvaluationReportModal(), { showBusy: false, debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_close_objective_report', () => closeObjectiveReportModal(), { showBusy: false, debounceMs: 80 });
-
-    $('#aspect_destinia_objective_report_modal').on('click', function (event) {
-        if (event.target === this) {
-            closeObjectiveReportModal();
-        }
-    });
-
-    $('#aspect_destinia_objective_report_body').on('click', '.aspect-destinia-icon-action', async function () {
-        const reportIndex = Number($(this).data('reportIndex'));
-        if (!Number.isInteger(reportIndex)) return;
-        if ($(this).data('busy')) return;
-
-        $(this).data('busy', true).prop('disabled', true);
-        try {
-            await withBusyIndicator(() => fixSingleObjectiveFromReportIndex(reportIndex));
-        } finally {
-            $(this).data('busy', false).prop('disabled', false);
-        }
-    });
-
     bindDebouncedButtonAction('#aspect_destinia_prev', () => stepBeat(-1), { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_next', () => stepBeat(1), { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_reset_beat', resetCurrentBeatToFirst, { showBusy: false, debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_clear_chat', clearCurrentChatMessages);
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
+    $(Object.keys(TEMPLATE_VALIDATION_RULES).map(id => `#${id}`).join(', ')).on('input change', updateFieldValidationIndicators);
 
     addFieldResetButtons();
+    updateFieldValidationIndicators();
 }
-
-
 
 function renderRoot() {
     if (document.getElementById(ROOT_ID)) return;
     $('#extensions_settings').append(buildSettingsHtml());
 
-    const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (modal && modal.parentElement !== document.body) {
-        document.body.appendChild(modal);
-    }
-
     ensureBusyIndicator();
-    setupObjectiveReportAutoClose();
     bindUI();
     refreshUI();
 }
