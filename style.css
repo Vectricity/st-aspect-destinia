@@ -22,6 +22,10 @@
     align-items: center;
 }
 
+#aspect_destinia_root .aspect-destinia-toolbar-top {
+    margin-bottom: 10px;
+}
+
 #aspect_destinia_root .aspect-destinia-grid {
     display: grid;
     gap: 10px;
@@ -52,6 +56,32 @@
     font-weight: 600;
     font-size: 0.95rem;
     opacity: 0.95;
+}
+
+#aspect_destinia_root .aspect-destinia-mini-heading {
+    font-size: 0.5rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.72;
+}
+
+#aspect_destinia_root .aspect-destinia-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+#aspect_destinia_root .aspect-destinia-warning-icon {
+    margin-left: auto;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: help;
+}
+
+#aspect_destinia_root .aspect-destinia-icon-button {
+    min-width: 42px;
+    align-self: stretch;
 }
 
 #aspect_destinia_root input[type="text"],
@@ -196,12 +226,6 @@
     transform: translateY(-50%) rotate(180deg);
 }
 
-#aspect_destinia_root .aspect-destinia-entry-name-display {
-    margin-top: 6px;
-    opacity: 0.85;
-    font-size: 0.9rem;
-}
-
 #aspect_destinia_root .aspect-destinia-hidden {
     display: none;
 }
@@ -284,92 +308,6 @@
 #chat .aspect-destinia-diagnostic-objective-icon {
     min-width: 1em;
 }
-
-#aspect_destinia_root .aspect-destinia-icon-action {
-    min-width: 34px;
-    padding: 4px 8px;
-}
-
-#aspect_destinia_objective_report_modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: clamp(12px, 4vh, 28px) 16px;
-    box-sizing: border-box;
-    overflow-y: auto;
-    z-index: 9999;
-}
-
-#aspect_destinia_objective_report_modal.open {
-    display: flex;
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-dialog {
-    width: min(860px, 92vw);
-    max-height: min(90vh, calc(100dvh - 24px));
-    overflow: hidden;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 12px;
-    background: var(--SmartThemeBlurTintColor, rgba(33, 33, 33, 0.98));
-    display: flex;
-    flex-direction: column;
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-body {
-    padding: 12px;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex: 1 1 auto;
-    min-height: 0;
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-item {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 10px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.03);
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-item-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-objective {
-    margin-top: 6px;
-    margin-bottom: 6px;
-    font-weight: 600;
-}
-
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-meta,
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-reason,
-#aspect_destinia_objective_report_modal .aspect-destinia-objective-report-empty {
-    opacity: 0.88;
-    line-height: 1.35;
-}
-
-
-#aspect_destinia_root .aspect-destinia-busy-button,
-#aspect_destinia_objective_report_modal .aspect-destinia-busy-button {
-    opacity: 0.72;
-    cursor: progress;
-}
-
 
 .aspect-destinia-busy-indicator {
     position: fixed;
