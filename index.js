@@ -203,6 +203,39 @@ const DEFAULT_SETTINGS = Object.freeze({
     }
 });
 
+const LABEL_HELP = Object.freeze({
+    extension_enabled: 'Turns Aspect: Destinia guidance on or off for the selected profile.',
+    profiles: 'Choose which saved profile you want to inspect, edit, or attach to the current chat.',
+    current_chat: 'Shows which chat this profile is currently linked to for progression tracking.',
+    evaluator_connection: 'Selects the model connection used for evaluating plot progression intent.',
+    evaluator_preset: 'Selects the chat completion preset used when calling the evaluator model.',
+    timeline: 'The story timeline JSON that defines plot points, objectives, hints, and transition guidance.',
+    timeline_preset: 'Choose a saved timeline preset to load into the editor for this profile.',
+    timeline_deviation: 'Allows the story to drift away from the timeline when roleplay meaningfully pushes it off-script.',
+    auto_resolve_deviation: 'Attempts to guide the story back onto the configured timeline after a deviation is allowed.',
+    objective_auto_advance: 'Automatically advances once objective completion reaches the configured threshold.',
+    objective_auto_advance_threshold: 'Sets how much of the current plot point objectives must be completed before auto-advance can trigger.',
+    plot_point_transition_threshold: 'Sets how strongly the evaluator must believe the story is ready before transitioning to the next plot point.',
+    plot_progression: 'Chooses whether progression readiness is evaluated from objectives or from simple completion hints.',
+    plot_alignment_strictness: 'Higher values keep the story more tightly aligned with the configured plot point and canon direction.',
+    plot_progression_aggressiveness: 'Higher values make the extension push forward more readily when progression is possible.',
+    recent_messages_to_evaluate: 'Controls how many recent chat messages are inspected when judging user intent and plot readiness.',
+    foreshadowing: 'Allows the extension to seed subtle hints toward the next plot point before the full transition happens.',
+    plot_stagnation: 'Allows explicit user intent to remain on the current plot point to pause advancement.',
+    injection_intro: 'Front-loaded guidance that frames how the injected prompt should behave.',
+    guidance_principles: 'Core behavioral rules the extension should follow while steering the story.',
+    current_plot_point_template: 'Template used to describe the active plot point inside the injected guidance.',
+    next_plot_point_template: 'Template used to describe the upcoming plot point for foreshadowing or transitions.',
+    transition_template: 'Template used to describe the current plot point transition requirements.',
+    objective_mode_template: 'Template used when progression is evaluated from explicit plot point objectives.',
+    hint_mode_template: 'Template used when progression is evaluated from completion hints instead of objectives.',
+    linger_instruction: 'Instruction injected when the user clearly wants to remain on the current plot point.',
+    advance_instruction: 'Instruction injected when the user appears ready to move toward the next plot point.',
+    pacing_instruction: 'Explains how strictness and pacing bias values should influence narrative steering.',
+    objective_completion_guidance: 'Explains how objective completion should be judged from recent user messages.',
+    evaluator_prompt: 'The full evaluator prompt used to classify user intent, readiness, and objective completion.'
+});
+
 const TEMPLATE_VALIDATION_RULES = Object.freeze({
     aspect_destinia_timeline: {
         type: 'json',
@@ -1280,7 +1313,7 @@ function buildDiagnosticBoxHtml(profile) {
             <div class="aspect-destinia-diagnostic-content">
                 <div><b class="aspect-destinia-diagnostic-sand">Current story plot point:</b> ${escapeHtml(current?.title || 'None')}</div>
                 <div><b class="aspect-destinia-diagnostic-sand">Next story plot point:</b> ${escapeHtml(next?.title || 'None')}</div>
-                <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)})</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${formatPercent(profile?.state?.lastIntentConfidence || 0)})</div>
                 <div><b class="aspect-destinia-diagnostic-sand">Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
                 <details>
                     <summary><b>Information used for this response</b></summary>
@@ -1976,6 +2009,50 @@ function addFieldResetButtons() {
     }
 }
 
+function setupInfoTooltips() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.dataset.infoTooltipsBound === 'true') return;
+
+    const closeOpenTooltips = (except = null) => {
+        root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach((tooltip) => {
+            if (tooltip === except) return;
+            tooltip.classList.remove('is-open');
+            const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
+            if (trigger) {
+                trigger.setAttribute('aria-expanded', 'false');
+            }
+        });
+    };
+
+    root.addEventListener('click', (event) => {
+        const trigger = event.target.closest('.aspect-destinia-info-trigger');
+        if (!trigger) return;
+
+        const tooltip = trigger.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const willOpen = !tooltip.classList.contains('is-open');
+        closeOpenTooltips(tooltip);
+        tooltip.classList.toggle('is-open', willOpen);
+        trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+
+    root.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeOpenTooltips();
+    });
+
+    document.addEventListener('click', (event) => {
+        if (event.target.closest(`#${ROOT_ID} .aspect-destinia-info-tooltip`)) return;
+        closeOpenTooltips();
+    });
+
+    root.dataset.infoTooltipsBound = 'true';
+}
+
 function selectTimelinePreset() {
     const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
     const preset = getTimelinePresetById(presetId);
@@ -1986,7 +2063,12 @@ function selectTimelinePreset() {
     }
 
     if (!preset) {
-        setSelectedTimelinePresetId(getTimelinePresets()[0]?.id || '');
+        const fallbackPresetId = getTimelinePresets()[0]?.id || '';
+        if (profile) {
+            profile.timelinePresetId = fallbackPresetId;
+        }
+        setSelectedTimelinePresetId(fallbackPresetId);
+        renderTimelinePresetOptions(profile);
         return;
     }
 
@@ -2065,22 +2147,29 @@ function deleteSelectedTimelinePreset() {
         return;
     }
 
+    if (preset.id === 'default_timeline_preset') {
+        toastr.warning(`${MODULE_NAME}: the default timeline preset cannot be deleted.`);
+        return;
+    }
+
     const confirmed = window.confirm(`Delete timeline preset "${preset.name}"? This cannot be undone.`);
     if (!confirmed) return;
 
     const settings = ensureSettings();
     settings.timelinePresets = settings.timelinePresets.filter(item => item.id !== preset.id);
     ensureTimelinePresetDefaults(settings);
+    const fallbackPresetId = settings.timelinePresets[0]?.id || '';
 
     for (const profile of settings.profiles) {
         if (profile.timelinePresetId === preset.id) {
-            profile.timelinePresetId = '';
+            profile.timelinePresetId = fallbackPresetId;
         }
     }
 
+    setSelectedTimelinePresetId(fallbackPresetId);
     saveSettings();
     renderTimelinePresetOptions(getDisplayedProfile() || getActiveProfile());
-    $('#aspect_destinia_timeline_preset_select').val('');
+    $('#aspect_destinia_timeline_preset_select').val(fallbackPresetId);
     toastr.info(`${MODULE_NAME}: deleted timeline preset "${preset.name}".`);
 }
 
@@ -2188,7 +2277,7 @@ function renderStatus(profile) {
             </div>
             <div class="aspect-destinia-stat">
                 <div class="aspect-destinia-stat-label">Last Confidence</div>
-                <div class="aspect-destinia-stat-value">${Number(profile?.state?.lastIntentConfidence || 0).toFixed(2)}</div>
+                <div class="aspect-destinia-stat-value">${formatPercent(profile?.state?.lastIntentConfidence || 0)}</div>
             </div>
         </div>
         <div class="aspect-destinia-status-reason">
@@ -2213,6 +2302,23 @@ function escapeHtml(text) {
         '"': '&quot;',
         "'": '&#39;'
     }[s]));
+}
+
+function renderInfoTip(key, label = 'More information') {
+    const helpText = LABEL_HELP[key];
+    if (!helpText) return '';
+
+    return `
+        <span class="aspect-destinia-info-tooltip" data-tooltip-key="${escapeHtml(key)}">
+            <button
+                type="button"
+                class="aspect-destinia-info-trigger"
+                aria-label="${escapeHtml(label)}"
+                aria-expanded="false"
+            ><sup>i</sup></button>
+            <span class="aspect-destinia-info-bubble" role="tooltip">${escapeHtml(helpText)}</span>
+        </span>
+    `;
 }
 
 function renderProfileOptions() {
@@ -2248,6 +2354,15 @@ function renderKnownChatOptions() {
     }
 }
 
+function updateTimelinePresetControls() {
+    const presetId = String($('#aspect_destinia_timeline_preset_select').val() || '').trim();
+    const preset = getTimelinePresetById(presetId);
+    const hasPreset = !!preset;
+    const isDefaultPreset = preset?.id === 'default_timeline_preset';
+    $('#aspect_destinia_timeline_preset_rename').prop('disabled', !hasPreset);
+    $('#aspect_destinia_timeline_preset_delete').prop('disabled', !hasPreset || isDefaultPreset);
+}
+
 function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiveProfile()) {
     const select = $('#aspect_destinia_timeline_preset_select');
     if (!select.length) return;
@@ -2256,18 +2371,30 @@ function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiv
     const selectedPresetId = profile
         ? String(profile.timelinePresetId || '').trim()
         : getSelectedTimelinePresetId();
+    const fallbackPresetId = selectedPresetId && presets.some(preset => preset.id === selectedPresetId)
+        ? selectedPresetId
+        : (presets[0]?.id || '');
 
     select.empty();
-    select.append('<option value="">-- Custom Timeline --</option>');
     for (const preset of presets) {
         select.append(`<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`);
     }
-    select.val(selectedPresetId && presets.some(preset => preset.id === selectedPresetId) ? selectedPresetId : '');
+    select.val(fallbackPresetId);
+    updateTimelinePresetControls();
 }
 
 function syncTimelinePresetSelection(profile) {
+    const presets = getTimelinePresets();
     const presetId = String(profile?.timelinePresetId || '').trim();
-    setSelectedTimelinePresetId(presetId || getTimelinePresets()[0]?.id || '');
+    const fallbackPresetId = presetId && presets.some(preset => preset.id === presetId)
+        ? presetId
+        : (presets[0]?.id || '');
+
+    if (profile && profile.timelinePresetId !== fallbackPresetId) {
+        profile.timelinePresetId = fallbackPresetId;
+    }
+
+    setSelectedTimelinePresetId(fallbackPresetId);
     renderTimelinePresetOptions(profile);
 }
 
@@ -2290,11 +2417,15 @@ function refreshUI() {
     updateExtensionPrompt();
 }
 
+function formatPercent(value) {
+    return `%${Math.round(clamp01(Number(value) || 0) * 100)}`;
+}
+
 function updateSliderDisplays() {
-    $('#aspect_destinia_strictness_value').text(Number($('#aspect_destinia_strictness').val() || 0).toFixed(2));
-    $('#aspect_destinia_pacing_value').text(Number($('#aspect_destinia_pacing').val() || 0).toFixed(2));
-    $('#aspect_destinia_threshold_value').text(Number($('#aspect_destinia_threshold').val() || 0).toFixed(2));
-    $('#aspect_destinia_objective_threshold_value').text(`${Math.round(clamp01(Number($('#aspect_destinia_objective_threshold').val() || 0)) * 100)}%`);
+    $('#aspect_destinia_strictness_value').text(formatPercent($('#aspect_destinia_strictness').val()));
+    $('#aspect_destinia_pacing_value').text(formatPercent($('#aspect_destinia_pacing').val()));
+    $('#aspect_destinia_threshold_value').text(formatPercent($('#aspect_destinia_threshold').val()));
+    $('#aspect_destinia_objective_threshold_value').text(formatPercent($('#aspect_destinia_objective_threshold').val()));
 }
 
 function buildSettingsHtml() {
@@ -2311,11 +2442,11 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
-                                <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled ${renderInfoTip('extension_enabled', 'Explain Extension Enabled')}</label>
                             </div>
 
                             <div class="aspect-destinia-field aspect-destinia-grow">
-                                <label class="aspect-destinia-label">Profiles</label>
+                                <label class="aspect-destinia-label">Profiles ${renderInfoTip('profiles', 'Explain Profiles')}</label>
                                 <div class="aspect-destinia-entry-picker-row">
                                     <div class="aspect-destinia-select-wrap">
                                         <select id="aspect_destinia_profile_select"></select>
@@ -2326,7 +2457,7 @@ function buildSettingsHtml() {
                             </div>
 
                             <div class="aspect-destinia-field aspect-destinia-grow">
-                                <label class="aspect-destinia-label">Current Chat</label>
+                                <label class="aspect-destinia-label">Current Chat ${renderInfoTip('current_chat', 'Explain Current Chat')}</label>
                                 <div class="aspect-destinia-inline">
                                     <select id="aspect_destinia_chat_select"></select>
                                 </div>
@@ -2349,11 +2480,11 @@ function buildSettingsHtml() {
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
 
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Evaluator Connection Profile</label>
+                                <label class="aspect-destinia-label">Evaluator Connection Profile ${renderInfoTip('evaluator_connection', 'Explain Evaluator Connection Profile')}</label>
                                 <select id="aspect_destinia_eval_connection"></select>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
+                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset ${renderInfoTip('evaluator_preset', 'Explain Evaluator Chat Completion Preset')}</label>
                                 <select id="aspect_destinia_eval_preset"></select>
                             </div>
                         </div>
@@ -2362,13 +2493,13 @@ function buildSettingsHtml() {
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-field">
                             <div class="aspect-destinia-label-row">
-                                <div class="aspect-destinia-section-title">Timeline</div>
+                                <div class="aspect-destinia-section-title">Timeline ${renderInfoTip('timeline', 'Explain Timeline')}</div>
                                 <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_timeline" hidden title="">⚠️</span>
                             </div>
                             <textarea id="aspect_destinia_timeline" class="aspect-destinia-code"></textarea>
                         </div>
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Timeline Preset</label>
+                            <label class="aspect-destinia-label">Timeline Preset ${renderInfoTip('timeline_preset', 'Explain Timeline Preset')}</label>
                             <div class="aspect-destinia-entry-picker-row">
                                 <div class="aspect-destinia-select-wrap">
                                     <select id="aspect_destinia_timeline_preset_select"></select>
@@ -2392,24 +2523,24 @@ function buildSettingsHtml() {
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Timeline Deviation</label>
+                                <label class="aspect-destinia-label">Timeline Deviation ${renderInfoTip('timeline_deviation', 'Explain Timeline Deviation')}</label>
                                 <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Auto-Resolve Deviation</label>
+                                <label class="aspect-destinia-label">Auto-Resolve Deviation ${renderInfoTip('auto_resolve_deviation', 'Explain Auto-Resolve Deviation')}</label>
                                 <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
                             </div>
-                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Objective Auto-Advance After Threshold</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Objective Auto-Advance After Threshold ${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance After Threshold')}</label>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold <span id="aspect_destinia_objective_threshold_value"></span></label>
+                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold ${renderInfoTip('objective_auto_advance_threshold', 'Explain Objective Auto-Advance Threshold')} <span id="aspect_destinia_objective_threshold_value"></span></label>
                                 <input id="aspect_destinia_objective_threshold" type="range" min="0.5" max="1" step="0.05" />
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Transition Threshold <span id="aspect_destinia_threshold_value"></span></label>
+                                <label class="aspect-destinia-label">Plot Point Transition Threshold ${renderInfoTip('plot_point_transition_threshold', 'Explain Plot Point Transition Threshold')} <span id="aspect_destinia_threshold_value"></span></label>
                                 <input id="aspect_destinia_threshold" type="range" min="0.5" max="0.95" step="0.01" />
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Progression</label>
+                                <label class="aspect-destinia-label">Plot Progression ${renderInfoTip('plot_progression', 'Explain Plot Progression')}</label>
                                 <select id="aspect_destinia_mode">
                                     <option value="objectives">Objective-based Rules</option>
                                     <option value="hints">Hint-based Rules</option>
@@ -2425,19 +2556,22 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-grid three sliders">
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Alignment Strictness <span id="aspect_destinia_strictness_value"></span></label>
+                                <label class="aspect-destinia-label">Plot Alignment Strictness ${renderInfoTip('plot_alignment_strictness', 'Explain Plot Alignment Strictness')} <span id="aspect_destinia_strictness_value"></span></label>
                                 <input id="aspect_destinia_strictness" type="range" min="0" max="1" step="0.01" />
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Progression Aggressiveness <span id="aspect_destinia_pacing_value"></span></label>
+                                <label class="aspect-destinia-label">Plot Progression Aggressiveness ${renderInfoTip('plot_progression_aggressiveness', 'Explain Plot Progression Aggressiveness')} <span id="aspect_destinia_pacing_value"></span></label>
                                 <input id="aspect_destinia_pacing" type="range" min="0" max="1" step="0.01" />
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
+                                <label class="aspect-destinia-label">Recent Messages to Evaluate ${renderInfoTip('recent_messages_to_evaluate', 'Explain Recent Messages to Evaluate')}</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
-                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadow Next Plot Point</label>
-                            <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Respect User Intended Plot Stagnation</label>
+                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadowing ${renderInfoTip('foreshadowing', 'Explain Foreshadowing')}</label>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Stagnation ${renderInfoTip('plot_stagnation', 'Explain Plot Stagnation')}</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Allowed</label>
+                            </div>
                         </div>
                     </div>
 
@@ -2450,26 +2584,26 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-section-title">Injected Guidance Fields</div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Injection Intro</label>
+                            <label class="aspect-destinia-label">Injection Intro ${renderInfoTip('injection_intro', 'Explain Injection Intro')}</label>
                             <textarea id="aspect_destinia_prompt_intro"></textarea>
                         </div>
 
                         <div class="aspect-destinia-field">
-                            <label class="aspect-destinia-label">Guidance Principles</label>
+                            <label class="aspect-destinia-label">Guidance Principles ${renderInfoTip('guidance_principles', 'Explain Guidance Principles')}</label>
                             <textarea id="aspect_destinia_prompt_principles"></textarea>
                         </div>
 
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <div class="aspect-destinia-label-row">
-                                    <label class="aspect-destinia-label">Current Plot Point Template</label>
+                                    <label class="aspect-destinia-label">Current Plot Point Template ${renderInfoTip('current_plot_point_template', 'Explain Current Plot Point Template')}</label>
                                     <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_current" hidden title="">⚠️</span>
                                 </div>
                                 <textarea id="aspect_destinia_prompt_current"></textarea>
                             </div>
                             <div class="aspect-destinia-field">
                                 <div class="aspect-destinia-label-row">
-                                    <label class="aspect-destinia-label">Next Plot Point Template</label>
+                                    <label class="aspect-destinia-label">Next Plot Point Template ${renderInfoTip('next_plot_point_template', 'Explain Next Plot Point Template')}</label>
                                     <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_next" hidden title="">⚠️</span>
                                 </div>
                                 <textarea id="aspect_destinia_prompt_next"></textarea>
@@ -2478,7 +2612,7 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-field">
                             <div class="aspect-destinia-label-row">
-                                <label class="aspect-destinia-label">Transition Template</label>
+                                <label class="aspect-destinia-label">Transition Template ${renderInfoTip('transition_template', 'Explain Transition Template')}</label>
                                 <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_transition" hidden title="">⚠️</span>
                             </div>
                             <textarea id="aspect_destinia_prompt_transition"></textarea>
@@ -2487,14 +2621,14 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <div class="aspect-destinia-label-row">
-                                    <label class="aspect-destinia-label">Objective Mode Template</label>
+                                    <label class="aspect-destinia-label">Objective Mode Template ${renderInfoTip('objective_mode_template', 'Explain Objective Mode Template')}</label>
                                     <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_objectives" hidden title="">⚠️</span>
                                 </div>
                                 <textarea id="aspect_destinia_prompt_objectives"></textarea>
                             </div>
                             <div class="aspect-destinia-field">
                                 <div class="aspect-destinia-label-row">
-                                    <label class="aspect-destinia-label">Hint Mode Template</label>
+                                    <label class="aspect-destinia-label">Hint Mode Template ${renderInfoTip('hint_mode_template', 'Explain Hint Mode Template')}</label>
                                     <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_hints" hidden title="">⚠️</span>
                                 </div>
                                 <textarea id="aspect_destinia_prompt_hints"></textarea>
@@ -2503,18 +2637,18 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Linger Instruction</label>
+                                <label class="aspect-destinia-label">Linger Instruction ${renderInfoTip('linger_instruction', 'Explain Linger Instruction')}</label>
                                 <textarea id="aspect_destinia_prompt_linger"></textarea>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Advance Instruction</label>
+                                <label class="aspect-destinia-label">Advance Instruction ${renderInfoTip('advance_instruction', 'Explain Advance Instruction')}</label>
                                 <textarea id="aspect_destinia_prompt_advance"></textarea>
                             </div>
                         </div>
 
                         <div class="aspect-destinia-field">
                             <div class="aspect-destinia-label-row">
-                                <label class="aspect-destinia-label">Pacing Instruction</label>
+                                <label class="aspect-destinia-label">Pacing Instruction ${renderInfoTip('pacing_instruction', 'Explain Pacing Instruction')}</label>
                                 <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_pacing" hidden title="">⚠️</span>
                             </div>
                             <textarea id="aspect_destinia_prompt_pacing"></textarea>
@@ -2522,7 +2656,7 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-field">
                             <div class="aspect-destinia-label-row">
-                                <label class="aspect-destinia-label">Objective Completion Guidance</label>
+                                <label class="aspect-destinia-label">Objective Completion Guidance ${renderInfoTip('objective_completion_guidance', 'Explain Objective Completion Guidance')}</label>
                                 <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_objective_guidance" hidden title="">⚠️</span>
                             </div>
                             <textarea id="aspect_destinia_prompt_objective_guidance"></textarea>
@@ -2530,7 +2664,7 @@ function buildSettingsHtml() {
 
                         <div class="aspect-destinia-field">
                             <div class="aspect-destinia-label-row">
-                                <label class="aspect-destinia-label">Evaluator Prompt</label>
+                                <label class="aspect-destinia-label">Evaluator Prompt ${renderInfoTip('evaluator_prompt', 'Explain Evaluator Prompt')}</label>
                                 <span class="aspect-destinia-warning-icon" data-validation-for="aspect_destinia_prompt_evaluator" hidden title="">⚠️</span>
                             </div>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
@@ -2577,6 +2711,7 @@ function bindUI() {
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
     $(Object.keys(TEMPLATE_VALIDATION_RULES).map(id => `#${id}`).join(', ')).on('input change', updateFieldValidationIndicators);
 
+    setupInfoTooltips();
     addFieldResetButtons();
     updateFieldValidationIndicators();
 }
