@@ -28,12 +28,18 @@
 
 #aspect_destinia_root .aspect-destinia-profile-controls {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: flex-end;
     gap: 10px;
 }
 
 #aspect_destinia_root .aspect-destinia-profile-button-row {
     align-items: stretch;
+    flex: 0 1 auto;
+}
+
+#aspect_destinia_root .aspect-destinia-profile-button-row-primary {
+    margin-left: auto;
 }
 
 #aspect_destinia_root .aspect-destinia-grid {
@@ -58,7 +64,19 @@
 }
 
 #aspect_destinia_root .aspect-destinia-grow {
-    flex: 1 1 280px;
+    flex: 1 1 240px;
+    min-width: min(100%, 240px);
+}
+
+#aspect_destinia_root .aspect-destinia-profile-controls .aspect-destinia-inline,
+#aspect_destinia_root .aspect-destinia-profile-controls .aspect-destinia-entry-picker-row {
+    width: 100%;
+}
+
+@media (max-width: 1100px) {
+    #aspect_destinia_root .aspect-destinia-profile-button-row-primary {
+        margin-left: 0;
+    }
 }
 
 #aspect_destinia_root .aspect-destinia-label,

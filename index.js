@@ -248,6 +248,21 @@ const TEMPLATE_VALIDATION_RULES = Object.freeze({
     }
 });
 
+const TIMELINE_REQUIRED_TOP_LEVEL_FIELDS = Object.freeze([
+    { key: 'storyTitle', label: 'storyTitle' },
+    { key: 'systemStyle', label: 'systemStyle' },
+    { key: 'plotPoints', label: 'plotPoints[]', isArray: true }
+]);
+
+const TIMELINE_REQUIRED_PLOT_POINT_FIELDS = Object.freeze([
+    { key: 'title', label: 'title' },
+    { key: 'summary', label: 'summary' },
+    { key: 'objectives', label: 'objectives[]', isArray: true },
+    { key: 'completionHints', label: 'completionHints[]', isArray: true },
+    { key: 'steeringPrompt', label: 'steeringPrompt' },
+    { key: 'pace', label: 'pace' }
+]);
+
 function getCtx() {
     return SillyTavern.getContext();
 }
@@ -420,6 +435,48 @@ function safeParseTimeline(text) {
     }
 }
 
+function validateTimelineStructure(timeline) {
+    if (!timeline || typeof timeline !== 'object' || Array.isArray(timeline)) {
+        return ['Timeline JSON must be an object.'];
+    }
+
+    const issues = [];
+    const missingTopLevel = TIMELINE_REQUIRED_TOP_LEVEL_FIELDS
+        .filter(({ key, isArray }) => {
+            if (!(key in timeline)) return true;
+            return isArray ? !Array.isArray(timeline[key]) : typeof timeline[key] !== 'string';
+        })
+        .map(field => field.label);
+
+    if (missingTopLevel.length) {
+        issues.push(`Missing required top-level fields: ${missingTopLevel.join(', ')}`);
+    }
+
+    if (!Array.isArray(timeline.plotPoints)) {
+        return issues.length ? issues : ['Timeline JSON must include plotPoints[].'];
+    }
+
+    timeline.plotPoints.forEach((point, index) => {
+        if (!point || typeof point !== 'object' || Array.isArray(point)) {
+            issues.push(`Plot point ${index + 1} must be an object.`);
+            return;
+        }
+
+        const missingFields = TIMELINE_REQUIRED_PLOT_POINT_FIELDS
+            .filter(({ key, isArray }) => {
+                if (!(key in point)) return true;
+                return isArray ? !Array.isArray(point[key]) : typeof point[key] !== 'string';
+            })
+            .map(field => field.label);
+
+        if (missingFields.length) {
+            issues.push(`Plot point ${index + 1} is missing required fields: ${missingFields.join(', ')}`);
+        }
+    });
+
+    return issues;
+}
+
 function getProfileDisplayName(profile) {
     const rawName = String(profile?.entryName || '').trim();
     if (!rawName || /^entry for\s+/i.test(rawName)) {
@@ -442,7 +499,15 @@ function validateConfiguredField(fieldId) {
 
     const value = String(el.value || '');
     if (config.type === 'json') {
-        return safeParseTimeline(value) ? null : `${config.label} must be valid JSON and include plotPoints[].`;
+        let parsed;
+        try {
+            parsed = JSON.parse(value);
+        } catch {
+            return `${config.label} must be valid JSON and include plotPoints[].`;
+        }
+
+        const issues = validateTimelineStructure(parsed);
+        return issues.length ? `${config.label}: ${issues.join('; ')}` : null;
     }
 
     if (!hasBalancedTemplateDelimiters(value)) {
@@ -1551,10 +1616,20 @@ function clearForm() {
 }
 
 function formToProfile(profile) {
-    const parsedTimeline = safeParseTimeline($('#aspect_destinia_timeline').val());
-    if (!parsedTimeline) {
+    const timelineText = String($('#aspect_destinia_timeline').val() || '');
+    let parsedTimeline;
+    try {
+        parsedTimeline = JSON.parse(timelineText);
+    } catch {
         throw new Error('Timeline JSON must be valid and include plotPoints[].');
     }
+
+    const timelineIssues = validateTimelineStructure(parsedTimeline);
+    if (timelineIssues.length) {
+        throw new Error(timelineIssues.join('; '));
+    }
+
+    parsedTimeline = normalizeTimeline(parsedTimeline);
 
     profile.enabled = $('#aspect_destinia_enabled').is(':checked');
     profile.advancementMode = $('#aspect_destinia_mode').val();
@@ -1638,13 +1713,21 @@ function exportTimelineToFile() {
         return;
     }
 
-    const parsed = safeParseTimeline(timelineText);
-    if (!parsed) {
+    let parsed;
+    try {
+        parsed = JSON.parse(timelineText);
+    } catch {
         toastr.error(`${MODULE_NAME}: cannot export invalid timeline JSON.`);
         return;
     }
 
-    downloadJsonToFile(parsed, 'timeline_json');
+    const timelineIssues = validateTimelineStructure(parsed);
+    if (timelineIssues.length) {
+        toastr.error(`${MODULE_NAME}: cannot export invalid timeline JSON (${timelineIssues.join('; ')}).`);
+        return;
+    }
+
+    downloadJsonToFile(normalizeTimeline(parsed), 'timeline_json');
 }
 
 function importTimelineFromFile(event) {
@@ -1655,12 +1738,19 @@ function importTimelineFromFile(event) {
     reader.onload = () => {
         try {
             const text = String(reader.result || '').trim();
-            const parsed = safeParseTimeline(text);
-            if (!parsed) {
-                throw new Error('timeline JSON must include plotPoints[].');
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch {
+                throw new Error('timeline JSON must be valid JSON.');
             }
 
-            $('#aspect_destinia_timeline').val(JSON.stringify(parsed, null, 2));
+            const timelineIssues = validateTimelineStructure(parsed);
+            if (timelineIssues.length) {
+                throw new Error(timelineIssues.join('; '));
+            }
+
+            $('#aspect_destinia_timeline').val(JSON.stringify(normalizeTimeline(parsed), null, 2));
             updateFieldValidationIndicators();
             toastr.success(`${MODULE_NAME}: imported timeline JSON from file.`);
         } catch (err) {
@@ -1978,9 +2068,10 @@ function buildSettingsHtml() {
                                 </div>
                             </div>
 
-                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row aspect-destinia-profile-button-row-primary">
                                 <button id="aspect_destinia_create" class="menu_button">Create Profile for Current Chat</button>
                                 <button id="aspect_destinia_attach_current" class="menu_button">Attach Current Chat</button>
+                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
                             </div>
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
                                 <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Profile</button>
@@ -1990,7 +2081,6 @@ function buildSettingsHtml() {
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
                                 <button id="aspect_destinia_export" class="menu_button">Export Profile</button>
                                 <button id="aspect_destinia_import" class="menu_button">Import Profile</button>
-                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Current Chat Messages</button>
                             </div>
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
