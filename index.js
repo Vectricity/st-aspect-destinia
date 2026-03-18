@@ -772,8 +772,10 @@ function closeObjectiveReportModal() {
 function isDestiniaSettingsVisible() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return false;
+
     const style = window.getComputedStyle(root);
     if (style.display === 'none' || style.visibility === 'hidden') return false;
+
     return root.getClientRects().length > 0;
 }
 
@@ -788,10 +790,11 @@ function setupObjectiveReportAutoClose() {
     if (!settingsHost || settingsHost.dataset.aspectDestiniaReportObserverBound === '1') return;
 
     settingsHost.dataset.aspectDestiniaReportObserverBound = '1';
+
     const observer = new MutationObserver(() => {
         closeObjectiveReportModalIfSettingsHidden();
     });
-    observer.observe(settingsHost, { attributes: true, attributeFilter: ['class', 'style'] });
+    observer.observe(settingsHost, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
 
     document.addEventListener('click', () => {
         window.setTimeout(closeObjectiveReportModalIfSettingsHidden, 0);
@@ -840,16 +843,7 @@ function renderObjectiveEvaluationReportModal() {
     body.html(rows);
 }
 
-function ensureObjectiveReportModalHost() {
-    const overlayHost = getOverlayHost();
-    const modal = document.getElementById('aspect_destinia_objective_report_modal');
-    if (overlayHost && modal && modal.parentElement !== overlayHost) {
-        overlayHost.appendChild(modal);
-    }
-}
-
 function openObjectiveEvaluationReportModal() {
-    ensureObjectiveReportModalHost();
     renderObjectiveEvaluationReportModal();
     $('#aspect_destinia_objective_report_modal').addClass('open').attr('aria-hidden', 'false');
 }
@@ -2519,15 +2513,18 @@ function bindUI() {
 
 
 function renderRoot() {
-    if (!document.getElementById(ROOT_ID)) {
-        $('#extensions_settings').append(buildSettingsHtml());
-        bindUI();
-        setupObjectiveReportAutoClose();
-        refreshUI();
+    if (document.getElementById(ROOT_ID)) return;
+    $('#extensions_settings').append(buildSettingsHtml());
+
+    const modal = document.getElementById('aspect_destinia_objective_report_modal');
+    if (modal && modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
     }
 
-    ensureObjectiveReportModalHost();
     ensureBusyIndicator();
+    setupObjectiveReportAutoClose();
+    bindUI();
+    refreshUI();
 }
 
 function onChatChanged() {
