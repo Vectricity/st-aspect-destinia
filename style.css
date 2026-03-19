@@ -316,6 +316,7 @@
     gap: 6px;
     flex-wrap: wrap;
     line-height: 1.2;
+    transform: translateY(-0.08em);
 }
 
 #aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {
