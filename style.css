@@ -91,6 +91,8 @@
     display: inline-flex;
     align-items: flex-start;
     margin-left: 4px;
+    isolation: isolate;
+    z-index: 1;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger {
@@ -115,6 +117,12 @@
 #aspect_destinia_root .aspect-destinia-info-trigger:focus-visible,
 #aspect_destinia_root .aspect-destinia-info-tooltip.is-open .aspect-destinia-info-trigger {
     opacity: 1;
+}
+
+#aspect_destinia_root .aspect-destinia-info-tooltip:hover,
+#aspect_destinia_root .aspect-destinia-info-tooltip:focus-within,
+#aspect_destinia_root .aspect-destinia-info-tooltip.is-open {
+    z-index: 100051;
 }
 
 #aspect_destinia_root .aspect-destinia-info-bubble {
@@ -183,6 +191,12 @@
     color: inherit;
     font-size: 0.95rem;
     line-height: 1;
+}
+
+#aspect_destinia_root .aspect-destinia-field-reset {
+    align-self: flex-start;
+    margin-top: 6px;
+    margin-bottom: 6px;
 }
 
 #aspect_destinia_root input[type="text"],
@@ -258,6 +272,26 @@
 
 #aspect_destinia_root .sliders input[type="range"] {
     width: 100%;
+}
+
+#aspect_destinia_root .aspect-destinia-slider-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+#aspect_destinia_root .aspect-destinia-slider-value {
+    margin-left: auto;
+    text-align: right;
+    font-size: 0.82rem;
+    opacity: 0.82;
+    white-space: nowrap;
+}
+
+#aspect_destinia_root .aspect-destinia-slider-meta .aspect-destinia-field-reset {
+    margin: 0;
 }
 
 #aspect_destinia_root .menu_button_primary {
