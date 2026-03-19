@@ -318,13 +318,9 @@
     cursor: pointer;
 }
 
-#aspect_destinia_root .aspect-destinia-checkbox-label-text > .aspect-destinia-info-tooltip {
-    margin-left: 0;
-}
-
-#aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {
-    margin-left: 0;
-    transform: translateY(0);
+#aspect_destinia_root .aspect-destinia-checkbox-label-group {
+    gap: 0;
+    line-height: 1.2;
 }
 
 #aspect_destinia_root .sliders input[type="range"] {

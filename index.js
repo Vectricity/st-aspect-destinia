@@ -798,55 +798,102 @@ function formatUseCurrentLabel(name, fallbackLabel) {
     return `${prefix}${truncateLabel(suffix, Math.max(0, 42 - prefix.length))}`;
 }
 
-function readSelectedOptionText(selectors = []) {
+function normalizeResolvedLabel(label, fallbackLabel = '') {
+    const normalized = String(label || '').trim();
+    const normalizedFallback = String(fallbackLabel || '').trim();
+    if (!normalized) return '';
+    if (normalizedFallback && normalized === normalizedFallback) return '';
+    if (/^use current\b/i.test(normalized)) return '';
+    return normalized;
+}
+
+function readSelectedOptionInfo(selectors = []) {
     for (const selector of selectors) {
         const select = document.querySelector(selector);
         if (!(select instanceof HTMLSelectElement)) continue;
         const selectedOption = select.options[select.selectedIndex];
         const text = String(selectedOption?.textContent || selectedOption?.label || '').trim();
-        if (text) return text;
+        const value = String(select.value || selectedOption?.value || '').trim();
+        const title = String(selectedOption?.title || '').trim();
+        if (text || value || title) {
+            return { text, value, title };
+        }
     }
-    return '';
+    return { text: '', value: '', title: '' };
+}
+
+function resolveCurrentModelLabel({ selectors = [], options = [], ctxCandidates = [], fallbackLabel = '' }) {
+    const selected = readSelectedOptionInfo(selectors);
+    const normalizedOptions = Array.isArray(options) ? options : [];
+    const findOptionLabel = (value) => {
+        const normalizedValue = String(value || '').trim();
+        if (!normalizedValue) return '';
+        const match = normalizedOptions.find(option => String(option?.value || '').trim() === normalizedValue);
+        return normalizeResolvedLabel(match?.label || '', fallbackLabel);
+    };
+
+    const directLabel = normalizeResolvedLabel(selected.text, fallbackLabel)
+        || normalizeResolvedLabel(selected.title, fallbackLabel);
+    if (directLabel) return directLabel;
+
+    const selectedValueLabel = findOptionLabel(selected.value);
+    if (selectedValueLabel) return selectedValueLabel;
+
+    for (const candidate of ctxCandidates) {
+        const normalizedCandidate = normalizeResolvedLabel(candidate, fallbackLabel);
+        if (normalizedCandidate) {
+            const mappedCandidateLabel = findOptionLabel(normalizedCandidate);
+            return mappedCandidateLabel || normalizedCandidate;
+        }
+    }
+
+    return fallbackLabel;
 }
 
 function getCurrentEvaluatorConnectionLabel() {
     const ctx = getCtx();
-    return String(
-        readSelectedOptionText([
+    return resolveCurrentModelLabel({
+        selectors: [
             '#chat_completion_connection_profile',
             '#chat_completion_connection',
             '#chat_completion_profile',
             '#openrouter_connection_profile'
-        ])
-        || ctx.chatCompletionSettings?.selectedProfile
-        || ctx.chat_completion_settings?.selected_profile
-        || ctx.activeConnectionProfile
-        || ctx.active_connection_profile
-        || ctx.currentConnectionProfile
-        || ctx.current_connection_profile
-        || 'Active Connection Profile'
-    ).trim() || 'Active Connection Profile';
+        ],
+        options: getSillyTavernConnectionProfiles(),
+        ctxCandidates: [
+            ctx.chatCompletionSettings?.selectedProfile,
+            ctx.chat_completion_settings?.selected_profile,
+            ctx.activeConnectionProfile,
+            ctx.active_connection_profile,
+            ctx.currentConnectionProfile,
+            ctx.current_connection_profile
+        ],
+        fallbackLabel: 'Active Connection Profile'
+    });
 }
 
 function getCurrentEvaluatorPresetLabel() {
     const ctx = getCtx();
-    return String(
-        readSelectedOptionText([
+    return resolveCurrentModelLabel({
+        selectors: [
             '#chat_completion_preset',
             '#chat_completion_presets',
             '#completion_preset',
             '#instruct_preset'
-        ])
-        || ctx.chatCompletionSettings?.selectedPreset
-        || ctx.chat_completion_settings?.selected_preset
-        || ctx.activeChatCompletionPreset
-        || ctx.active_chat_completion_preset
-        || ctx.currentChatCompletionPreset
-        || ctx.current_chat_completion_preset
-        || ctx.activePreset
-        || ctx.active_preset
-        || 'Chat Completion Preset'
-    ).trim() || 'Chat Completion Preset';
+        ],
+        options: getSillyTavernChatPresets(),
+        ctxCandidates: [
+            ctx.chatCompletionSettings?.selectedPreset,
+            ctx.chat_completion_settings?.selected_preset,
+            ctx.activeChatCompletionPreset,
+            ctx.active_chat_completion_preset,
+            ctx.currentChatCompletionPreset,
+            ctx.current_chat_completion_preset,
+            ctx.activePreset,
+            ctx.active_preset
+        ],
+        fallbackLabel: 'Chat Completion Preset'
+    });
 }
 
 function findNestedCollectionsByPathKeywords(root, requiredKeywords = []) {
@@ -2001,7 +2048,7 @@ function importProfileFromFile(event) {
             imported.timeline = normalizeTimeline(imported.timeline || safeParseTimeline(imported.timelineText) || structuredClone(DEFAULT_TIMELINE_TEMPLATE));
             imported.timelineText = JSON.stringify(imported.timeline, null, 2);
             if (!getTimelinePresetById(imported.timelinePresetId)) {
-                imported.timelinePresetId = '';
+                imported.timelinePresetId = getTimelinePresets()[0]?.id || '';
             }
             getProfiles().push(imported);
             persistProfile(imported);
@@ -2267,17 +2314,18 @@ function setupInfoTooltips() {
 }
 
 function selectTimelinePreset() {
+    const defaultPresetId = getTimelinePresets()[0]?.id || '';
     const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
     const preset = getTimelinePresetById(presetId);
     const profile = getDisplayedProfile();
 
     if (profile) {
-        profile.timelinePresetId = preset?.id || '';
+        profile.timelinePresetId = preset?.id || defaultPresetId;
         persistProfile(profile);
     }
 
     if (!preset) {
-        setSelectedTimelinePresetId('');
+        setSelectedTimelinePresetId(defaultPresetId);
         renderTimelinePresetOptions(profile);
         return;
     }
@@ -2398,6 +2446,7 @@ function saveSelectedTimelinePreset() {
 }
 
 function deleteSelectedTimelinePreset() {
+    const defaultPresetId = getTimelinePresets()[0]?.id || '';
     const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
     const preset = getTimelinePresetById(presetId);
     if (!preset) {
@@ -2419,14 +2468,14 @@ function deleteSelectedTimelinePreset() {
 
     for (const profile of settings.profiles) {
         if (profile.timelinePresetId === preset.id) {
-            profile.timelinePresetId = '';
+            profile.timelinePresetId = defaultPresetId;
         }
     }
 
-    setSelectedTimelinePresetId('');
+    setSelectedTimelinePresetId(defaultPresetId);
     saveSettings();
     renderTimelinePresetOptions(getDisplayedProfile() || getActiveProfile());
-    $('#aspect_destinia_timeline_preset_select').val('');
+    $('#aspect_destinia_timeline_preset_select').val(defaultPresetId);
     toastr.info(`${MODULE_NAME}: deleted timeline preset "${preset.name}".`);
 }
 
@@ -2635,15 +2684,15 @@ function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiv
     if (!select.length) return;
 
     const presets = getTimelinePresets();
+    const defaultPresetId = presets[0]?.id || '';
     const selectedPresetId = profile
         ? String(profile.timelinePresetId || '').trim()
         : getSelectedTimelinePresetId();
     const fallbackPresetId = selectedPresetId && presets.some(preset => preset.id === selectedPresetId)
         ? selectedPresetId
-        : '';
+        : defaultPresetId;
 
     select.empty();
-    select.append('<option value="">-- No Timeline Preset --</option>');
     for (const preset of presets) {
         select.append(`<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`);
     }
@@ -2653,10 +2702,11 @@ function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiv
 
 function syncTimelinePresetSelection(profile) {
     const presets = getTimelinePresets();
+    const defaultPresetId = presets[0]?.id || '';
     const presetId = String(profile?.timelinePresetId || '').trim();
     const fallbackPresetId = presetId && presets.some(preset => preset.id === presetId)
         ? presetId
-        : '';
+        : defaultPresetId;
     const preset = getTimelinePresetById(fallbackPresetId);
 
     if (profile && profile.timelinePresetId !== fallbackPresetId) {
@@ -2722,7 +2772,7 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
-                                <div class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /><label for="aspect_destinia_enabled" class="aspect-destinia-checkbox-label-text">Extension Enabled${renderInfoTip('extension_enabled', 'Explain Extension Enabled')}</label></div>
+                                <div class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /><span class="aspect-destinia-label aspect-destinia-checkbox-label-group"><label for="aspect_destinia_enabled" class="aspect-destinia-checkbox-label-text">Extension Enabled</label>${renderInfoTip('extension_enabled', 'Explain Extension Enabled')}</span></div>
                             </div>
 
                             <div class="aspect-destinia-field aspect-destinia-grow">
