@@ -86,7 +86,7 @@
 #aspect_destinia_root .aspect-destinia-section-title,
 #aspect_destinia_root .aspect-destinia-objective-label {
     display: inline-flex;
-    align-items: flex-start;
+    align-items: center;
     font-weight: 600;
     font-size: 0.95rem;
     opacity: 0.95;
@@ -95,10 +95,10 @@
 #aspect_destinia_root .aspect-destinia-info-tooltip {
     position: relative;
     display: inline-flex;
-    align-items: flex-start;
+    align-items: center;
     margin-left: 0.22em;
     isolation: isolate;
-    transform: translateY(-0.32em);
+    transform: translateY(-0.12em);
     z-index: 1;
 }
 
@@ -306,15 +306,21 @@
 
 #aspect_destinia_root .checkbox_label input[type="checkbox"] {
     margin-top: 0;
+    align-self: center;
     flex: 0 0 auto;
 }
 
 #aspect_destinia_root .aspect-destinia-checkbox-label-text {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     flex-wrap: wrap;
     line-height: 1.2;
+}
+
+#aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {
+    margin-left: 0;
+    transform: translateY(0);
 }
 
 #aspect_destinia_root .sliders input[type="range"] {
