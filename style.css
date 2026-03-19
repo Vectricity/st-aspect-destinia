@@ -93,7 +93,7 @@
     position: relative;
     display: inline-flex;
     align-items: flex-start;
-    margin-left: 2px;
+    margin-left: 4px;
     isolation: isolate;
     z-index: 1;
 }
@@ -113,17 +113,25 @@
     color: var(--SmartThemeEmColor, var(--SmartThemeBodyColor));
     cursor: help;
     font-family: "Trebuchet MS", Verdana, sans-serif;
-    font-size: 0.66rem;
-    font-weight: 600;
+    font-size: 0.62rem;
+    font-weight: 700;
     line-height: 1;
-    padding: 0;
+    padding: 4px;
     opacity: 0.88;
-    transform: translateY(-0.24em);
+    transform: translateY(-0.42em);
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger-text {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 999px;
+    background: currentColor;
+    color: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, transparent);
     font: inherit;
+    line-height: 1;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger:hover,
@@ -288,6 +296,12 @@
     align-items: center;
     gap: 8px;
     min-height: 40px;
+}
+
+#aspect_destinia_root .aspect-destinia-checkbox-label-text {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 #aspect_destinia_root .sliders input[type="range"] {
