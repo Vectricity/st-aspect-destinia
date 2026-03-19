@@ -93,7 +93,7 @@
     position: relative;
     display: inline-flex;
     align-items: flex-start;
-    margin-left: 4px;
+    margin-left: 2px;
     isolation: isolate;
     z-index: 1;
 }
@@ -112,12 +112,13 @@
     background: transparent;
     color: var(--SmartThemeEmColor, var(--SmartThemeBodyColor));
     cursor: help;
-    font-size: 0.82rem;
-    font-weight: 700;
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    font-size: 0.66rem;
+    font-weight: 600;
     line-height: 1;
     padding: 0;
     opacity: 0.88;
-    transform: translateY(-0.3em);
+    transform: translateY(-0.24em);
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger-text {
