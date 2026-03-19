@@ -2650,7 +2650,7 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
                             <div class="aspect-destinia-field aspect-destinia-grow">
                                 <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
-                                <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /> Extension Enabled${renderInfoTip('extension_enabled', 'Explain Extension Enabled')}</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_enabled" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Extension Enabled${renderInfoTip('extension_enabled', 'Explain Extension Enabled')}</span></label>
                             </div>
 
                             <div class="aspect-destinia-field aspect-destinia-grow">
