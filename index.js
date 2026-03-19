@@ -2483,7 +2483,7 @@ function renderStatus(profile) {
             ${escapeHtml(reason)}
         </div>` : ''}
         <div class="aspect-destinia-objective-list">
-            <div class="aspect-destinia-objective-label">Current Objectives</div>
+            <div class="aspect-destinia-section-title aspect-destinia-objective-label">Current Objectives</div>
             ${(Array.isArray(current?.objectives) && current.objectives.length)
                 ? current.objectives.map((obj) => {
                     const normalized = normalizeObjectiveItem(obj);
