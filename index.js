@@ -639,16 +639,45 @@ function updateFieldValidationIndicators() {
 
 function getCurrentPlotPoint(profile) {
     const timeline = getActiveTimeline(profile);
-    const points = timeline?.plotPoints || [];
-    const idx = Math.max(0, Math.min(profile.state.currentIndex || 0, Math.max(points.length - 1, 0)));
-    profile.state.currentIndex = idx;
-    return points[idx] || null;
+    return getTimelinePlotPoint(profile, timeline);
 }
 
 function getNextPlotPoint(profile) {
     const timeline = getActiveTimeline(profile);
+    return getTimelinePlotPoint(profile, timeline, 1);
+}
+
+function getTimelinePlotPoint(profile, timeline, offset = 0) {
     const points = timeline?.plotPoints || [];
-    return points[(profile.state.currentIndex || 0) + 1] || null;
+    const rawIndex = (profile?.state?.currentIndex || 0) + offset;
+    if (offset !== 0) {
+        return points[rawIndex] || null;
+    }
+    const idx = Math.max(0, Math.min(rawIndex, Math.max(points.length - 1, 0)));
+    if (offset === 0 && profile?.state) {
+        profile.state.currentIndex = idx;
+    }
+    return points[idx] || null;
+}
+
+function getStatusTimeline(profile) {
+    if (!profile) return null;
+    const timelineTextEl = document.getElementById('aspect_destinia_timeline');
+    if (!timelineTextEl) return getActiveTimeline(profile);
+
+    const displayedProfile = getDisplayedProfile();
+    if (!displayedProfile || displayedProfile.id !== profile.id) {
+        return getActiveTimeline(profile);
+    }
+
+    return safeParseTimeline(timelineTextEl.value) || getActiveTimeline(profile);
+}
+
+function updateCurrentObjectivesPreview() {
+    const profile = getDisplayedProfile() || getActiveProfile();
+    if (!profile) return;
+    const previewProfile = structuredClone(profile);
+    renderStatus(previewProfile, { timeline: getStatusTimeline(profile) });
 }
 
 function formatList(items) {
@@ -764,14 +793,34 @@ function truncateLabel(label, maxLength = 42) {
 
 function formatUseCurrentLabel(name, fallbackLabel) {
     const normalizedName = String(name || '').trim();
-    const baseLabel = normalizedName ? `Use Current ${normalizedName}` : `Use Current ${fallbackLabel}`;
-    return truncateLabel(baseLabel);
+    const prefix = 'Use Current ';
+    const suffix = normalizedName || fallbackLabel;
+    return `${prefix}${truncateLabel(suffix, Math.max(0, 42 - prefix.length))}`;
+}
+
+function readSelectedOptionText(selectors = []) {
+    for (const selector of selectors) {
+        const select = document.querySelector(selector);
+        if (!(select instanceof HTMLSelectElement)) continue;
+        const selectedOption = select.options[select.selectedIndex];
+        const text = String(selectedOption?.textContent || selectedOption?.label || '').trim();
+        if (text) return text;
+    }
+    return '';
 }
 
 function getCurrentEvaluatorConnectionLabel() {
     const ctx = getCtx();
     return String(
-        ctx.activeConnectionProfile
+        readSelectedOptionText([
+            '#chat_completion_connection_profile',
+            '#chat_completion_connection',
+            '#chat_completion_profile',
+            '#openrouter_connection_profile'
+        ])
+        || ctx.chatCompletionSettings?.selectedProfile
+        || ctx.chat_completion_settings?.selected_profile
+        || ctx.activeConnectionProfile
         || ctx.active_connection_profile
         || ctx.currentConnectionProfile
         || ctx.current_connection_profile
@@ -782,7 +831,15 @@ function getCurrentEvaluatorConnectionLabel() {
 function getCurrentEvaluatorPresetLabel() {
     const ctx = getCtx();
     return String(
-        ctx.activeChatCompletionPreset
+        readSelectedOptionText([
+            '#chat_completion_preset',
+            '#chat_completion_presets',
+            '#completion_preset',
+            '#instruct_preset'
+        ])
+        || ctx.chatCompletionSettings?.selectedPreset
+        || ctx.chat_completion_settings?.selected_preset
+        || ctx.activeChatCompletionPreset
         || ctx.active_chat_completion_preset
         || ctx.currentChatCompletionPreset
         || ctx.current_chat_completion_preset
@@ -2227,6 +2284,7 @@ function selectTimelinePreset() {
 
     $('#aspect_destinia_timeline').val(preset.timelineText || JSON.stringify(preset.timeline, null, 2));
     updateFieldValidationIndicators();
+    updateCurrentObjectivesPreview();
     setSelectedTimelinePresetId(preset.id);
     toastr.info(`${MODULE_NAME}: loaded timeline preset "${preset.name}".`);
 }
@@ -2467,9 +2525,10 @@ function getPlotProgressionStatus(profile) {
     return 'Stagnate';
 }
 
-function renderStatus(profile) {
-    const current = getCurrentPlotPoint(profile);
-    const next = getNextPlotPoint(profile);
+function renderStatus(profile, options = {}) {
+    const timeline = options.timeline || getActiveTimeline(profile);
+    const current = getTimelinePlotPoint(profile, timeline);
+    const next = getTimelinePlotPoint(profile, timeline, 1);
     const reason = String(profile?.state?.lastIntentReason || '').trim();
 
     $('#aspect_destinia_status').html(`
@@ -2955,6 +3014,7 @@ function bindUI() {
 
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
     $(Object.keys(TEMPLATE_VALIDATION_RULES).map(id => `#${id}`).join(', ')).on('input change', updateFieldValidationIndicators);
+    $('#aspect_destinia_timeline').on('input change', updateCurrentObjectivesPreview);
 
     setupInfoTooltips();
     addFieldResetButtons();
