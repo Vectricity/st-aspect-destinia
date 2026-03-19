@@ -2060,6 +2060,7 @@ function setupInfoTooltips() {
             if (trigger) {
                 trigger.setAttribute('aria-expanded', 'false');
             }
+            clearTooltipPosition(bubble);
         });
     };
 
@@ -2117,8 +2118,12 @@ function setupInfoTooltips() {
         root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach(updateTooltipPosition);
     };
 
+    const closeTooltipsOnScroll = () => {
+        closeOpenTooltips();
+    };
+
     window.addEventListener('resize', refreshOpenTooltips);
-    window.addEventListener('scroll', refreshOpenTooltips, true);
+    window.addEventListener('scroll', closeTooltipsOnScroll, true);
 
     root.dataset.infoTooltipsBound = 'true';
 }
@@ -2516,7 +2521,7 @@ function buildSettingsHtml() {
                             </div>
 
                             <div class="aspect-destinia-field aspect-destinia-grow">
-                                <label class="aspect-destinia-label">Profiles${renderInfoTip('profiles', 'Explain Profiles')}</label>
+                                <label class="aspect-destinia-label">Profile${renderInfoTip('profiles', 'Explain Profiles')}</label>
                                 <div class="aspect-destinia-entry-picker-row">
                                     <div class="aspect-destinia-select-wrap">
                                         <select id="aspect_destinia_profile_select"></select>
@@ -2549,6 +2554,11 @@ function buildSettingsHtml() {
                             </div>
                             <input id="aspect_destinia_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
 
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Evaluator Connection Profile${renderInfoTip('evaluator_connection', 'Explain Evaluator Connection Profile')}</label>
                                 <select id="aspect_destinia_eval_connection"></select>
@@ -2588,19 +2598,24 @@ function buildSettingsHtml() {
                             <button id="aspect_destinia_timeline_import" class="menu_button">Import</button>
                             <input id="aspect_destinia_timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
                         </div>
-                    </div>
-
-                    <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Timeline Deviation${renderInfoTip('timeline_deviation', 'Explain Timeline Deviation')}</label>
                                 <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Auto-Resolve Deviation${renderInfoTip('auto_resolve_deviation', 'Explain Auto-Resolve Deviation')}</label>
+                                <label class="aspect-destinia-label">Timeline Deviation Auto-Resolve${renderInfoTip('auto_resolve_deviation', 'Explain Auto-Resolve Deviation')}</label>
                                 <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
                             </div>
-                            <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Objective Auto-Advance After Threshold${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance After Threshold')}</label>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid three">
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Objective Auto-Advance${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance After Threshold')}</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> After Threshold</label>
+                            </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Auto-Advance Threshold${renderInfoTip('objective_auto_advance_threshold', 'Explain Objective Auto-Advance Threshold')}</label>
                                 <input id="aspect_destinia_objective_threshold" type="range" min="0.5" max="1" step="0.05" />
