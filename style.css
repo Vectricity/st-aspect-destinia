@@ -37,16 +37,8 @@
 }
 
 #aspect_destinia_root .aspect-destinia-profile-button-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    align-items: stretch;
     flex: 1 1 100%;
     width: 100%;
-}
-
-#aspect_destinia_root .aspect-destinia-profile-button-row .menu_button {
-    width: 100%;
-    min-height: 48px;
 }
 
 #aspect_destinia_root .aspect-destinia-profile-button-row-primary {
@@ -116,10 +108,6 @@
 
 #aspect_destinia_root .aspect-destinia-checkbox-field {
     justify-content: space-between;
-}
-
-#aspect_destinia_root .aspect-destinia-checkbox-field > .checkbox_label {
-    align-self: flex-start;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger {
@@ -311,15 +299,13 @@
 
 #aspect_destinia_root .checkbox_label {
     display: inline-flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
-    min-height: 40px;
     line-height: 1.2;
 }
 
 #aspect_destinia_root .checkbox_label input[type="checkbox"] {
-    margin-top: 0.08em;
-    align-self: flex-start;
+    margin: 0;
     flex: 0 0 auto;
 }
 
@@ -329,7 +315,7 @@
     gap: 6px;
     flex-wrap: wrap;
     line-height: 1.2;
-    transform: none;
+    cursor: pointer;
 }
 
 #aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {
