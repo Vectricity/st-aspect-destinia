@@ -2673,15 +2673,13 @@ function buildSettingsHtml() {
 
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row aspect-destinia-profile-button-row-primary">
                                 <button id="aspect_destinia_create" class="menu_button">Create Profile</button>
-                                <button id="aspect_destinia_attach_current" class="menu_button">Attach Current Chat</button>
-                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Messages</button>
-                            </div>
-                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
                                 <button id="aspect_destinia_save" class="menu_button menu_button_primary">Save Profile</button>
                                 <button id="aspect_destinia_duplicate" class="menu_button">Duplicate Profile</button>
                                 <button id="aspect_destinia_delete" class="menu_button menu_button_danger">Delete Profile</button>
                             </div>
                             <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                                <button id="aspect_destinia_attach_current" class="menu_button">Attach Current Chat</button>
+                                <button id="aspect_destinia_clear_chat" class="menu_button menu_button_danger">Delete Messages</button>
                                 <button id="aspect_destinia_export" class="menu_button">Export Profile</button>
                                 <button id="aspect_destinia_import" class="menu_button">Import Profile</button>
                             </div>
