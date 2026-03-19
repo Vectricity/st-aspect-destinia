@@ -2508,17 +2508,12 @@ function renderInfoTip(key, label = 'More information') {
     const helpText = LABEL_HELP[key];
     if (!helpText) return '';
 
-    return `
-        <span class="aspect-destinia-info-tooltip" data-tooltip-key="${escapeHtml(key)}">
-            <button
+    return `<span class="aspect-destinia-info-tooltip" data-tooltip-key="${escapeHtml(key)}"><button
                 type="button"
                 class="aspect-destinia-info-trigger"
                 aria-label="${escapeHtml(label)}"
                 aria-expanded="false"
-            ><span class="aspect-destinia-info-trigger-text" aria-hidden="true">i</span></button>
-            <span class="aspect-destinia-info-bubble" role="tooltip">${escapeHtml(helpText)}</span>
-        </span>
-    `;
+            ><span class="aspect-destinia-info-trigger-text" aria-hidden="true">i</span></button><span class="aspect-destinia-info-bubble" role="tooltip">${escapeHtml(helpText)}</span></span>`;
 }
 
 function renderProfileOptions() {
