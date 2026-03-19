@@ -2735,11 +2735,11 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Timeline Deviation${renderInfoTip('timeline_deviation', 'Explain Timeline Deviation')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /> Allowed</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_timeline_deviation_allowed" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Allowed</span></label>
                             </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Timeline Deviation Auto-Resolve${renderInfoTip('auto_resolve_deviation', 'Explain Auto-Resolve Deviation')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /> Enabled</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_resolve_deviation" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Enabled</span></label>
                             </div>
                         </div>
                     </div>
@@ -2748,7 +2748,7 @@ function buildSettingsHtml() {
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field aspect-destinia-checkbox-field">
                                 <label class="aspect-destinia-label">Objective Auto-Advance${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Enabled</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Enabled</span></label>
                             </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Auto-Advance Threshold${renderInfoTip('objective_auto_advance_threshold', 'Explain Objective Auto-Advance Threshold')}</label>
@@ -2792,11 +2792,11 @@ function buildSettingsHtml() {
                             </div>
                             <div class="aspect-destinia-field aspect-destinia-checkbox-field">
                                 <label class="aspect-destinia-label">Plot Foreshadowing${renderInfoTip('foreshadowing', 'Explain Plot Foreshadowing')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Enabled</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Enabled</span></label>
                             </div>
                             <div class="aspect-destinia-field aspect-destinia-checkbox-field">
                                 <label class="aspect-destinia-label">Plot Stagnation${renderInfoTip('plot_stagnation', 'Explain Plot Stagnation')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Allowed</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Allowed</span></label>
                             </div>
                         </div>
                     </div>
