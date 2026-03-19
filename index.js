@@ -80,7 +80,7 @@ const DEFAULT_PROFILE = Object.freeze({
         currentIndex: 0,
         lastIntentDecision: 'stay',
         lastIntentConfidence: 0,
-        lastIntentReason: 'No intent evaluation has run yet.',
+        lastIntentReason: '',
         lastEvalHash: '',
         lastTransitionAt: 0,
         lastDiagnostic: null
@@ -210,7 +210,7 @@ const LABEL_HELP = Object.freeze({
     evaluator_connection: 'Selects the model connection used for evaluating plot progression intent.',
     evaluator_preset: 'Selects the chat completion preset used when calling the evaluator model.',
     timeline: 'The story timeline JSON that defines plot points, objectives, hints, and transition guidance.',
-    timeline_preset: 'Choose a saved timeline preset to load into the editor for this profile.',
+    timeline_preset: 'Choose a saved timeline preset to load into the editor for this profile. Presets are stored independently, but each profile remembers the most recently selected preset when it still exists.',
     timeline_deviation: 'Allows the story to drift away from the timeline when roleplay meaningfully pushes it off-script.',
     auto_resolve_deviation: 'Attempts to guide the story back onto the configured timeline after a deviation is allowed.',
     objective_auto_advance: 'Automatically advances once objective completion reaches the configured threshold.',
@@ -1716,8 +1716,8 @@ function profileToForm(profile) {
     $('#aspect_destinia_window').val(profile.intentWindow ?? 8);
     renderEvaluatorModelOptions(profile);
     $('#aspect_destinia_chat_select').val(profile.attachedChatKey || '');
-    $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
     syncTimelinePresetSelection(profile);
+    $('#aspect_destinia_timeline').val(profile.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2));
 
     $('#aspect_destinia_prompt_intro').val(profile.prompts.injectionIntro || '');
     $('#aspect_destinia_prompt_principles').val(profile.prompts.guidancePrinciples || '');
@@ -2203,14 +2203,11 @@ function selectTimelinePreset() {
 
     if (profile) {
         profile.timelinePresetId = preset?.id || '';
+        persistProfile(profile);
     }
 
     if (!preset) {
-        const fallbackPresetId = getTimelinePresets()[0]?.id || '';
-        if (profile) {
-            profile.timelinePresetId = fallbackPresetId;
-        }
-        setSelectedTimelinePresetId(fallbackPresetId);
+        setSelectedTimelinePresetId('');
         renderTimelinePresetOptions(profile);
         return;
     }
@@ -2221,7 +2218,7 @@ function selectTimelinePreset() {
     toastr.info(`${MODULE_NAME}: loaded timeline preset "${preset.name}".`);
 }
 
-function saveTimelinePresetFromEditor({ duplicate = false } = {}) {
+function createTimelinePresetFromEditor({ duplicate = false } = {}) {
     const timelineText = String($('#aspect_destinia_timeline').val() || '').trim();
     if (!timelineText) {
         toastr.warning(`${MODULE_NAME}: timeline is empty.`);
@@ -2244,11 +2241,11 @@ function saveTimelinePresetFromEditor({ duplicate = false } = {}) {
 
     parsed = normalizeTimeline(parsed);
     const selectedPresetId = $('#aspect_destinia_timeline_preset_select').val() || '';
-    const existingPreset = duplicate ? null : getTimelinePresetById(selectedPresetId);
+    const sourcePreset = getTimelinePresetById(selectedPresetId);
     const defaultName = duplicate
-        ? `${existingPreset?.name || 'Timeline Preset'} (Copy)`
-        : (existingPreset?.name || 'Timeline Preset');
-    const enteredName = window.prompt(duplicate ? 'Duplicate timeline preset as' : 'Save timeline preset as', defaultName);
+        ? `${sourcePreset?.name || 'Timeline Preset'} (Copy)`
+        : 'Timeline Preset';
+    const enteredName = window.prompt(duplicate ? 'Duplicate timeline preset as' : 'Create timeline preset as', defaultName);
     if (enteredName === null) return;
 
     const name = String(enteredName || '').trim();
@@ -2258,28 +2255,75 @@ function saveTimelinePresetFromEditor({ duplicate = false } = {}) {
     }
 
     const presets = getTimelinePresets();
-    const preset = existingPreset || {
+    const preset = {
         id: makeId('timeline_preset')
     };
 
     preset.name = name;
     preset.timeline = parsed;
     preset.timelineText = JSON.stringify(parsed, null, 2);
-
-    if (!existingPreset) {
-        presets.push(preset);
-    }
+    presets.push(preset);
 
     const profile = getDisplayedProfile();
     if (profile) {
         profile.timelinePresetId = preset.id;
+        profile.timelineText = preset.timelineText;
+        profile.timeline = structuredClone(parsed);
+        persistProfile(profile);
     }
 
     setSelectedTimelinePresetId(preset.id);
     saveSettings();
     renderTimelinePresetOptions(profile);
     $('#aspect_destinia_timeline_preset_select').val(preset.id);
-    toastr.success(`${MODULE_NAME}: ${duplicate ? 'duplicated' : 'saved'} timeline preset "${preset.name}".`);
+    toastr.success(`${MODULE_NAME}: ${duplicate ? 'duplicated' : 'created'} timeline preset "${preset.name}".`);
+}
+
+function saveSelectedTimelinePreset() {
+    const presetId = $('#aspect_destinia_timeline_preset_select').val() || '';
+    const preset = getTimelinePresetById(presetId);
+    if (!preset) {
+        createTimelinePresetFromEditor();
+        return;
+    }
+
+    const timelineText = String($('#aspect_destinia_timeline').val() || '').trim();
+    if (!timelineText) {
+        toastr.warning(`${MODULE_NAME}: timeline is empty.`);
+        return;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(timelineText);
+    } catch {
+        toastr.error(`${MODULE_NAME}: timeline must be valid JSON before saving a preset.`);
+        return;
+    }
+
+    const issues = validateTimelineStructure(parsed);
+    if (issues.length) {
+        toastr.error(`${MODULE_NAME}: timeline must be valid before saving a preset (${issues.join('; ')}).`);
+        return;
+    }
+
+    parsed = normalizeTimeline(parsed);
+    preset.timeline = parsed;
+    preset.timelineText = JSON.stringify(parsed, null, 2);
+
+    const profile = getDisplayedProfile();
+    if (profile) {
+        profile.timelinePresetId = preset.id;
+        profile.timelineText = preset.timelineText;
+        profile.timeline = structuredClone(parsed);
+        persistProfile(profile);
+    }
+
+    setSelectedTimelinePresetId(preset.id);
+    saveSettings();
+    renderTimelinePresetOptions(profile);
+    $('#aspect_destinia_timeline_preset_select').val(preset.id);
+    toastr.success(`${MODULE_NAME}: saved timeline preset "${preset.name}".`);
 }
 
 function deleteSelectedTimelinePreset() {
@@ -2301,18 +2345,17 @@ function deleteSelectedTimelinePreset() {
     const settings = ensureSettings();
     settings.timelinePresets = settings.timelinePresets.filter(item => item.id !== preset.id);
     ensureTimelinePresetDefaults(settings);
-    const fallbackPresetId = settings.timelinePresets[0]?.id || '';
 
     for (const profile of settings.profiles) {
         if (profile.timelinePresetId === preset.id) {
-            profile.timelinePresetId = fallbackPresetId;
+            profile.timelinePresetId = '';
         }
     }
 
-    setSelectedTimelinePresetId(fallbackPresetId);
+    setSelectedTimelinePresetId('');
     saveSettings();
     renderTimelinePresetOptions(getDisplayedProfile() || getActiveProfile());
-    $('#aspect_destinia_timeline_preset_select').val(fallbackPresetId);
+    $('#aspect_destinia_timeline_preset_select').val('');
     toastr.info(`${MODULE_NAME}: deleted timeline preset "${preset.name}".`);
 }
 
@@ -2414,6 +2457,7 @@ function getPlotProgressionStatus(profile) {
 function renderStatus(profile) {
     const current = getCurrentPlotPoint(profile);
     const next = getNextPlotPoint(profile);
+    const reason = String(profile?.state?.lastIntentReason || '').trim();
 
     $('#aspect_destinia_status').html(`
         <div class="aspect-destinia-status-grid">
@@ -2434,10 +2478,12 @@ function renderStatus(profile) {
                 <div class="aspect-destinia-stat-value">${formatPercent(profile?.state?.lastIntentConfidence || 0)}</div>
             </div>
         </div>
+        ${reason ? `
         <div class="aspect-destinia-status-reason">
-            ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}
-        </div>
+            ${escapeHtml(reason)}
+        </div>` : ''}
         <div class="aspect-destinia-objective-list">
+            <div class="aspect-destinia-objective-label">Current Objectives</div>
             ${(Array.isArray(current?.objectives) && current.objectives.length)
                 ? current.objectives.map((obj) => {
                     const normalized = normalizeObjectiveItem(obj);
@@ -2527,9 +2573,10 @@ function renderTimelinePresetOptions(profile = getDisplayedProfile() || getActiv
         : getSelectedTimelinePresetId();
     const fallbackPresetId = selectedPresetId && presets.some(preset => preset.id === selectedPresetId)
         ? selectedPresetId
-        : (presets[0]?.id || '');
+        : '';
 
     select.empty();
+    select.append('<option value="">-- No Timeline Preset --</option>');
     for (const preset of presets) {
         select.append(`<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`);
     }
@@ -2542,10 +2589,22 @@ function syncTimelinePresetSelection(profile) {
     const presetId = String(profile?.timelinePresetId || '').trim();
     const fallbackPresetId = presetId && presets.some(preset => preset.id === presetId)
         ? presetId
-        : (presets[0]?.id || '');
+        : '';
+    const preset = getTimelinePresetById(fallbackPresetId);
 
     if (profile && profile.timelinePresetId !== fallbackPresetId) {
         profile.timelinePresetId = fallbackPresetId;
+        persistProfile(profile);
+    }
+
+    if (profile) {
+        if (preset) {
+            profile.timelineText = preset.timelineText || JSON.stringify(preset.timeline, null, 2);
+            profile.timeline = structuredClone(preset.timeline);
+        } else if (!profile.timelineText) {
+            profile.timelineText = JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2);
+            profile.timeline = structuredClone(DEFAULT_TIMELINE_TEMPLATE);
+        }
     }
 
     setSelectedTimelinePresetId(fallbackPresetId);
@@ -2668,6 +2727,7 @@ function buildSettingsHtml() {
                             </div>
                         </div>
                         <div class="aspect-destinia-actions">
+                            <button id="aspect_destinia_timeline_preset_create" class="menu_button">Create Preset</button>
                             <button id="aspect_destinia_timeline_preset_save" class="menu_button menu_button_primary">Save Preset</button>
                             <button id="aspect_destinia_timeline_preset_duplicate" class="menu_button">Duplicate Preset</button>
                             <button id="aspect_destinia_timeline_preset_delete" class="menu_button menu_button_danger">Delete Preset</button>
@@ -2735,8 +2795,11 @@ function buildSettingsHtml() {
                                 <label class="aspect-destinia-label">Recent Messages to Evaluate${renderInfoTip('recent_messages_to_evaluate', 'Explain Recent Messages to Evaluate')}</label>
                                 <input id="aspect_destinia_window" type="number" min="4" max="20" step="1" />
                             </div>
-                            <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Foreshadowing${renderInfoTip('foreshadowing', 'Explain Foreshadowing')}</label>
-                            <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Plot Foreshadowing${renderInfoTip('foreshadowing', 'Explain Plot Foreshadowing')}</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_foreshadow" type="checkbox" /> Enabled</label>
+                            </div>
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
                                 <label class="aspect-destinia-label">Plot Stagnation${renderInfoTip('plot_stagnation', 'Explain Plot Stagnation')}</label>
                                 <label class="checkbox_label"><input id="aspect_destinia_respect_intent" type="checkbox" /> Allowed</label>
                             </div>
@@ -2837,6 +2900,13 @@ function buildSettingsHtml() {
                             </div>
                             <textarea id="aspect_destinia_prompt_evaluator" class="aspect-destinia-code tall"></textarea>
                         </div>
+
+                        <div class="aspect-destinia-footer-superscript" aria-label="Aspect of Destiny footer">
+                            <div class="aspect-destinia-footer-meta">
+                                <span>version 0.0.0</span>
+                                <span>Genisai</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2867,8 +2937,9 @@ function bindUI() {
     bindDebouncedButtonAction('#aspect_destinia_timeline_export', exportTimelineToFile);
     bindDebouncedButtonAction('#aspect_destinia_timeline_import', () => $('#aspect_destinia_timeline_import_file').trigger('click'), { showBusy: false });
     $('#aspect_destinia_timeline_import_file').on('change', importTimelineFromFile);
-    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_save', () => saveTimelinePresetFromEditor(), { debounceMs: 120 });
-    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_duplicate', () => saveTimelinePresetFromEditor({ duplicate: true }), { debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_create', () => createTimelinePresetFromEditor(), { debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_save', saveSelectedTimelinePreset, { debounceMs: 120 });
+    bindDebouncedButtonAction('#aspect_destinia_timeline_preset_duplicate', () => createTimelinePresetFromEditor({ duplicate: true }), { debounceMs: 120 });
     bindDebouncedButtonAction('#aspect_destinia_timeline_preset_delete', deleteSelectedTimelinePreset, { debounceMs: 120 });
 
     bindDebouncedButtonAction('#aspect_destinia_prev', () => stepPlotPoint(-1), { showBusy: false, debounceMs: 120 });
