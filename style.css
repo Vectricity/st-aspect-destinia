@@ -110,28 +110,30 @@
 #aspect_destinia_root .aspect-destinia-info-trigger {
     border: 0;
     background: transparent;
-    color: var(--SmartThemeEmColor, var(--SmartThemeBodyColor));
+    color: #111111;
     cursor: help;
     font-family: "Trebuchet MS", Verdana, sans-serif;
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     font-weight: 700;
     line-height: 1;
-    padding: 4px;
-    opacity: 0.88;
-    transform: translateY(-0.42em);
+    padding: 3px;
+    opacity: 0.96;
+    transform: translateY(-0.35em);
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger-text {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.1rem;
-    height: 1.1rem;
+    width: 0.92rem;
+    height: 0.92rem;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 92%, var(--SmartThemeBodyColor) 8%);
-    color: currentColor;
+    border: 1px solid color-mix(in srgb, #ffffff 78%, var(--SmartThemeBorderColor) 22%);
+    background: color-mix(in srgb, #ffffff 92%, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 8%);
+    color: #111111;
     font: inherit;
     line-height: 1;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger:hover,
