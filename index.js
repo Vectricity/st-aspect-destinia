@@ -2022,20 +2022,50 @@ function setupInfoTooltips() {
     if (!root || root.dataset.infoTooltipsBound === 'true') return;
 
     const viewportPadding = 12;
+    const tooltipLayerId = `${ROOT_ID}_tooltip_layer`;
+    let tooltipLayer = document.getElementById(tooltipLayerId);
+    if (!tooltipLayer) {
+        tooltipLayer = document.createElement('div');
+        tooltipLayer.id = tooltipLayerId;
+        tooltipLayer.className = 'aspect-destinia-tooltip-layer';
+        document.body.appendChild(tooltipLayer);
+    }
+
+    root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip, index) => {
+        const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
+        if (!bubble) return;
+        const bubbleId = bubble.id || `${ROOT_ID}_tooltip_${index + 1}`;
+        bubble.id = bubbleId;
+        tooltip.dataset.tooltipBubbleId = bubbleId;
+        if (bubble.parentElement !== tooltipLayer) {
+            tooltipLayer.appendChild(bubble);
+        }
+    });
+
+    const getTooltipParts = (tooltip) => {
+        if (!tooltip) return { trigger: null, bubble: null };
+        const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
+        const bubbleId = tooltip.dataset.tooltipBubbleId || '';
+        const bubble = bubbleId ? document.getElementById(bubbleId) : null;
+        return { trigger, bubble };
+    };
 
     const clearTooltipPosition = (bubble) => {
         if (!bubble) return;
+        bubble.classList.remove('is-active', 'is-measuring', 'is-positioned');
         bubble.style.removeProperty('--aspect-destinia-tooltip-left');
         bubble.style.removeProperty('--aspect-destinia-tooltip-top');
     };
 
     const updateTooltipPosition = (tooltip) => {
         if (!tooltip) return;
-        const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
-        const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
+        const { trigger, bubble } = getTooltipParts(tooltip);
         if (!trigger || !bubble) return;
 
-        clearTooltipPosition(bubble);
+        bubble.classList.remove('is-positioned');
+        bubble.classList.add('is-measuring');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-left');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-top');
 
         const triggerRect = trigger.getBoundingClientRect();
         const bubbleRect = bubble.getBoundingClientRect();
@@ -2049,18 +2079,35 @@ function setupInfoTooltips() {
 
         bubble.style.setProperty('--aspect-destinia-tooltip-left', `${Math.round(left)}px`);
         bubble.style.setProperty('--aspect-destinia-tooltip-top', `${Math.round(top)}px`);
+        bubble.classList.remove('is-measuring');
+        bubble.classList.add('is-positioned');
+    };
+
+    const hideTooltip = (tooltip) => {
+        if (!tooltip) return;
+        tooltip.classList.remove('is-open');
+        const { trigger, bubble } = getTooltipParts(tooltip);
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+        clearTooltipPosition(bubble);
+    };
+
+    const showTooltip = (tooltip, { pinned = false } = {}) => {
+        if (!tooltip) return;
+        const { trigger, bubble } = getTooltipParts(tooltip);
+        if (!trigger || !bubble) return;
+
+        bubble.classList.add('is-active');
+        tooltip.classList.toggle('is-open', pinned);
+        trigger.setAttribute('aria-expanded', pinned ? 'true' : 'false');
+        updateTooltipPosition(tooltip);
     };
 
     const closeOpenTooltips = (except = null) => {
-        root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach((tooltip) => {
+        root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip) => {
             if (tooltip === except) return;
-            tooltip.classList.remove('is-open');
-            const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
-            const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
-            if (trigger) {
-                trigger.setAttribute('aria-expanded', 'false');
-            }
-            clearTooltipPosition(bubble);
+            hideTooltip(tooltip);
         });
     };
 
@@ -2074,13 +2121,29 @@ function setupInfoTooltips() {
     root.addEventListener('mouseenter', (event) => {
         const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
         if (!tooltip) return;
-        updateTooltipPosition(tooltip);
+        closeOpenTooltips(tooltip);
+        showTooltip(tooltip);
+    }, true);
+
+    root.addEventListener('mouseleave', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
+        hideTooltip(tooltip);
     }, true);
 
     root.addEventListener('focusin', (event) => {
         const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
         if (!tooltip) return;
-        updateTooltipPosition(tooltip);
+        closeOpenTooltips(tooltip);
+        showTooltip(tooltip);
+    });
+
+    root.addEventListener('focusout', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
+        const nextTarget = event.relatedTarget;
+        if (nextTarget && tooltip.contains(nextTarget)) return;
+        hideTooltip(tooltip);
     });
 
     root.addEventListener('click', (event) => {
@@ -2097,11 +2160,11 @@ function setupInfoTooltips() {
 
         const willOpen = !tooltip.classList.contains('is-open');
         closeOpenTooltips(tooltip);
-        tooltip.classList.toggle('is-open', willOpen);
-        trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-        if (willOpen) {
-            updateTooltipPosition(tooltip);
+        if (!willOpen) {
+            hideTooltip(tooltip);
+            return;
         }
+        showTooltip(tooltip, { pinned: true });
     });
 
     root.addEventListener('keydown', (event) => {
@@ -2115,7 +2178,12 @@ function setupInfoTooltips() {
     }, true);
 
     const refreshOpenTooltips = () => {
-        root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach(updateTooltipPosition);
+        root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip) => {
+            const { bubble } = getTooltipParts(tooltip);
+            if (bubble?.classList.contains('is-active')) {
+                updateTooltipPosition(tooltip);
+            }
+        });
     };
 
     const closeTooltipsOnScroll = () => {
@@ -2332,6 +2400,17 @@ function stepPlotPoint(delta) {
     refreshUI();
 }
 
+function getPlotProgressionStatus(profile) {
+    const reason = String(profile?.state?.lastIntentReason || '');
+    if (reason.startsWith('Advanced after ')) {
+        return 'Next Plot Point';
+    }
+    if (profile?.state?.lastIntentDecision === 'advance') {
+        return 'Transition';
+    }
+    return 'Stagnate';
+}
+
 function renderStatus(profile) {
     const current = getCurrentPlotPoint(profile);
     const next = getNextPlotPoint(profile);
@@ -2347,11 +2426,11 @@ function renderStatus(profile) {
                 <div class="aspect-destinia-stat-value">${escapeHtml(next?.title || 'None')}</div>
             </div>
             <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Last Intent</div>
-                <div class="aspect-destinia-stat-value">${escapeHtml(profile?.state?.lastIntentDecision || 'stay')}</div>
+                <div class="aspect-destinia-stat-label">Plot Progression</div>
+                <div class="aspect-destinia-stat-value">${escapeHtml(getPlotProgressionStatus(profile))}</div>
             </div>
             <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Last Confidence</div>
+                <div class="aspect-destinia-stat-label">Plot Progression Evaluation</div>
                 <div class="aspect-destinia-stat-value">${formatPercent(profile?.state?.lastIntentConfidence || 0)}</div>
             </div>
         </div>
@@ -2613,8 +2692,8 @@ function buildSettingsHtml() {
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field aspect-destinia-checkbox-field">
-                                <label class="aspect-destinia-label">Objective Auto-Advance${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance After Threshold')}</label>
-                                <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> After Threshold</label>
+                                <label class="aspect-destinia-label">Objective Auto-Advance${renderInfoTip('objective_auto_advance', 'Explain Objective Auto-Advance')}</label>
+                                <label class="checkbox_label"><input id="aspect_destinia_auto_advance" type="checkbox" /> Enabled</label>
                             </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Auto-Advance Threshold${renderInfoTip('objective_auto_advance_threshold', 'Explain Objective Auto-Advance Threshold')}</label>
@@ -2627,10 +2706,10 @@ function buildSettingsHtml() {
                                 <div class="aspect-destinia-slider-meta"><span id="aspect_destinia_threshold_value" class="aspect-destinia-slider-value"></span></div>
                             </div>
                             <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Progression${renderInfoTip('plot_progression', 'Explain Plot Progression')}</label>
+                                <label class="aspect-destinia-label">Plot Progression Rules${renderInfoTip('plot_progression', 'Explain Plot Progression Rules')}</label>
                                 <select id="aspect_destinia_mode">
-                                    <option value="objectives">Objective-based Rules</option>
-                                    <option value="hints">Hint-based Rules</option>
+                                    <option value="objectives">Objective-based</option>
+                                    <option value="hints">Hint-based</option>
                                 </select>
                             </div>
                         </div>
