@@ -90,7 +90,6 @@
     position: relative;
     display: inline-flex;
     align-items: flex-start;
-    vertical-align: super;
     margin-left: 4px;
 }
 
@@ -99,10 +98,17 @@
     background: transparent;
     color: var(--SmartThemeEmColor, var(--SmartThemeBodyColor));
     cursor: help;
-    font-size: 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 700;
     line-height: 1;
     padding: 0;
-    opacity: 0.78;
+    opacity: 0.88;
+    transform: translateY(-0.3em);
+}
+
+#aspect_destinia_root .aspect-destinia-info-trigger-text {
+    display: inline-block;
+    font: inherit;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger:hover,
@@ -112,10 +118,12 @@
 }
 
 #aspect_destinia_root .aspect-destinia-info-bubble {
+    --aspect-destinia-tooltip-shift: 0px;
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
-    width: min(280px, 70vw);
+    width: min(280px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
     padding: 8px 10px;
     border-radius: 10px;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -127,7 +135,7 @@
     line-height: 1.35;
     opacity: 0;
     pointer-events: none;
-    transform: translateY(-4px);
+    transform: translate3d(var(--aspect-destinia-tooltip-shift), -4px, 0);
     transition: opacity 120ms ease, transform 120ms ease;
     z-index: 30;
 }
@@ -137,7 +145,7 @@
 #aspect_destinia_root .aspect-destinia-info-tooltip.is-open .aspect-destinia-info-bubble {
     opacity: 1;
     pointer-events: auto;
-    transform: translateY(0);
+    transform: translate3d(var(--aspect-destinia-tooltip-shift), 0, 0);
 }
 
 #aspect_destinia_root .aspect-destinia-mini-heading {

@@ -2013,13 +2013,37 @@ function setupInfoTooltips() {
     const root = document.getElementById(ROOT_ID);
     if (!root || root.dataset.infoTooltipsBound === 'true') return;
 
+    const updateTooltipPosition = (tooltip) => {
+        if (!tooltip) return;
+        const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
+        if (!bubble) return;
+
+        bubble.style.removeProperty('--aspect-destinia-tooltip-shift');
+
+        const viewportPadding = 12;
+        const rect = bubble.getBoundingClientRect();
+        let shift = 0;
+
+        if (rect.left < viewportPadding) {
+            shift = viewportPadding - rect.left;
+        } else if (rect.right > window.innerWidth - viewportPadding) {
+            shift = (window.innerWidth - viewportPadding) - rect.right;
+        }
+
+        bubble.style.setProperty('--aspect-destinia-tooltip-shift', `${Math.round(shift)}px`);
+    };
+
     const closeOpenTooltips = (except = null) => {
         root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach((tooltip) => {
             if (tooltip === except) return;
             tooltip.classList.remove('is-open');
             const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
+            const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
             if (trigger) {
                 trigger.setAttribute('aria-expanded', 'false');
+            }
+            if (bubble) {
+                bubble.style.removeProperty('--aspect-destinia-tooltip-shift');
             }
         });
     };
@@ -2038,6 +2062,9 @@ function setupInfoTooltips() {
         closeOpenTooltips(tooltip);
         tooltip.classList.toggle('is-open', willOpen);
         trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        if (willOpen) {
+            updateTooltipPosition(tooltip);
+        }
     });
 
     root.addEventListener('keydown', (event) => {
@@ -2045,9 +2072,13 @@ function setupInfoTooltips() {
         closeOpenTooltips();
     });
 
-    document.addEventListener('click', (event) => {
+    document.addEventListener('pointerdown', (event) => {
         if (event.target.closest(`#${ROOT_ID} .aspect-destinia-info-tooltip`)) return;
         closeOpenTooltips();
+    }, true);
+
+    window.addEventListener('resize', () => {
+        root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach(updateTooltipPosition);
     });
 
     root.dataset.infoTooltipsBound = 'true';
@@ -2315,7 +2346,7 @@ function renderInfoTip(key, label = 'More information') {
                 class="aspect-destinia-info-trigger"
                 aria-label="${escapeHtml(label)}"
                 aria-expanded="false"
-            ><sup>i</sup></button>
+            ><span class="aspect-destinia-info-trigger-text" aria-hidden="true">i</span></button>
             <span class="aspect-destinia-info-bubble" role="tooltip">${escapeHtml(helpText)}</span>
         </span>
     `;
