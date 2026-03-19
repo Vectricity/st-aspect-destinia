@@ -2013,24 +2013,34 @@ function setupInfoTooltips() {
     const root = document.getElementById(ROOT_ID);
     if (!root || root.dataset.infoTooltipsBound === 'true') return;
 
+    const viewportPadding = 12;
+
+    const clearTooltipPosition = (bubble) => {
+        if (!bubble) return;
+        bubble.style.removeProperty('--aspect-destinia-tooltip-left');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-top');
+    };
+
     const updateTooltipPosition = (tooltip) => {
         if (!tooltip) return;
+        const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
         const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
-        if (!bubble) return;
+        if (!trigger || !bubble) return;
 
-        bubble.style.removeProperty('--aspect-destinia-tooltip-shift');
+        clearTooltipPosition(bubble);
 
-        const viewportPadding = 12;
-        const rect = bubble.getBoundingClientRect();
-        let shift = 0;
+        const triggerRect = trigger.getBoundingClientRect();
+        const bubbleRect = bubble.getBoundingClientRect();
+        const maxLeft = Math.max(viewportPadding, window.innerWidth - viewportPadding - bubbleRect.width);
+        const desiredLeft = triggerRect.right - bubbleRect.width;
+        const left = Math.min(Math.max(viewportPadding, desiredLeft), maxLeft);
+        const top = Math.min(
+            triggerRect.bottom + 8,
+            Math.max(viewportPadding, window.innerHeight - viewportPadding - bubbleRect.height)
+        );
 
-        if (rect.left < viewportPadding) {
-            shift = viewportPadding - rect.left;
-        } else if (rect.right > window.innerWidth - viewportPadding) {
-            shift = (window.innerWidth - viewportPadding) - rect.right;
-        }
-
-        bubble.style.setProperty('--aspect-destinia-tooltip-shift', `${Math.round(shift)}px`);
+        bubble.style.setProperty('--aspect-destinia-tooltip-left', `${Math.round(left)}px`);
+        bubble.style.setProperty('--aspect-destinia-tooltip-top', `${Math.round(top)}px`);
     };
 
     const closeOpenTooltips = (except = null) => {
@@ -2042,11 +2052,28 @@ function setupInfoTooltips() {
             if (trigger) {
                 trigger.setAttribute('aria-expanded', 'false');
             }
-            if (bubble) {
-                bubble.style.removeProperty('--aspect-destinia-tooltip-shift');
-            }
+            clearTooltipPosition(bubble);
         });
     };
+
+    root.addEventListener('pointerdown', (event) => {
+        const trigger = event.target.closest('.aspect-destinia-info-trigger');
+        if (!trigger) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+
+    root.addEventListener('mouseenter', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+        updateTooltipPosition(tooltip);
+    }, true);
+
+    root.addEventListener('focusin', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+        updateTooltipPosition(tooltip);
+    });
 
     root.addEventListener('click', (event) => {
         const trigger = event.target.closest('.aspect-destinia-info-trigger');
@@ -2057,6 +2084,8 @@ function setupInfoTooltips() {
 
         event.preventDefault();
         event.stopPropagation();
+
+        trigger.focus({ preventScroll: true });
 
         const willOpen = !tooltip.classList.contains('is-open');
         closeOpenTooltips(tooltip);
@@ -2077,9 +2106,12 @@ function setupInfoTooltips() {
         closeOpenTooltips();
     }, true);
 
-    window.addEventListener('resize', () => {
+    const refreshOpenTooltips = () => {
         root.querySelectorAll('.aspect-destinia-info-tooltip.is-open').forEach(updateTooltipPosition);
-    });
+    };
+
+    window.addEventListener('resize', refreshOpenTooltips);
+    window.addEventListener('scroll', refreshOpenTooltips, true);
 
     root.dataset.infoTooltipsBound = 'true';
 }
