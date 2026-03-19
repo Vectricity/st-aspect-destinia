@@ -92,7 +92,7 @@
 #aspect_destinia_root .aspect-destinia-info-tooltip {
     position: relative;
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     margin-left: 4px;
     isolation: isolate;
     z-index: 1;
@@ -107,7 +107,8 @@
 }
 
 #aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {
-    align-self: center;
+    align-self: flex-start;
+    margin-top: 0.08em;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger {
@@ -116,20 +117,20 @@
     color: #111111;
     cursor: help;
     font-family: "Trebuchet MS", Verdana, sans-serif;
-    font-size: 0.58rem;
+    font-size: 0.52rem;
     font-weight: 700;
     line-height: 1;
     padding: 2px;
     opacity: 0.96;
-    transform: translateY(-0.18em);
+    transform: translateY(-0.04em);
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger-text {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 0.64rem;
-    height: 0.64rem;
+    width: 0.58rem;
+    height: 0.58rem;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, #ffffff 78%, var(--SmartThemeBorderColor) 22%);
     background: color-mix(in srgb, #ffffff 92%, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 8%);
@@ -137,6 +138,7 @@
     font: inherit;
     line-height: 1;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+    padding-top: 0.08em;
 }
 
 #aspect_destinia_root .aspect-destinia-info-trigger:hover,
@@ -298,14 +300,18 @@
 
 #aspect_destinia_root .checkbox_label {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     min-height: 40px;
 }
 
+#aspect_destinia_root .checkbox_label input[type="checkbox"] {
+    margin-top: 0.18em;
+}
+
 #aspect_destinia_root .aspect-destinia-checkbox-label-text {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 4px;
     flex-wrap: wrap;
     line-height: 1.2;
