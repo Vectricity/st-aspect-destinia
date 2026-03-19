@@ -128,8 +128,8 @@
     width: 1.1rem;
     height: 1.1rem;
     border-radius: 999px;
-    background: currentColor;
-    color: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 92%, var(--SmartThemeBodyColor) 8%);
+    color: currentColor;
     font: inherit;
     line-height: 1;
 }
