@@ -312,10 +312,14 @@
 #aspect_destinia_root .aspect-destinia-checkbox-label-text {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 0;
     flex-wrap: wrap;
     line-height: 1.2;
     cursor: pointer;
+}
+
+#aspect_destinia_root .aspect-destinia-checkbox-label-text > .aspect-destinia-info-tooltip {
+    margin-left: 6px;
 }
 
 #aspect_destinia_root .aspect-destinia-checkbox-label-text .aspect-destinia-info-tooltip {

@@ -755,6 +755,19 @@ function getSillyTavernChatPresets() {
     return [];
 }
 
+function truncateLabel(label, maxLength = 42) {
+    const normalized = String(label || '').trim();
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function formatUseCurrentLabel(name, fallbackLabel) {
+    const normalizedName = String(name || '').trim();
+    const baseLabel = normalizedName ? `Use Current ${normalizedName}` : `Use Current ${fallbackLabel}`;
+    return truncateLabel(baseLabel);
+}
+
 function getCurrentEvaluatorConnectionLabel() {
     const ctx = getCtx();
     return String(
@@ -826,13 +839,13 @@ function renderEvaluatorModelOptions(profile) {
     const profiles = getSillyTavernConnectionProfiles();
     const presets = getSillyTavernChatPresets();
 
-    connectionSelect.empty().append(`<option value="">Use Current ${escapeHtml(getCurrentEvaluatorConnectionLabel())}</option>`);
+    connectionSelect.empty().append(`<option value="" title="${escapeHtml(getCurrentEvaluatorConnectionLabel())}">${escapeHtml(formatUseCurrentLabel(getCurrentEvaluatorConnectionLabel(), 'Active Connection Profile'))}</option>`);
     for (const item of profiles) {
         connectionSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
     connectionSelect.val(profile?.llmConnectionProfile || '');
 
-    presetSelect.empty().append(`<option value="">Use Current ${escapeHtml(getCurrentEvaluatorPresetLabel())}</option>`);
+    presetSelect.empty().append(`<option value="" title="${escapeHtml(getCurrentEvaluatorPresetLabel())}">${escapeHtml(formatUseCurrentLabel(getCurrentEvaluatorPresetLabel(), 'Chat Completion Preset'))}</option>`);
     for (const item of presets) {
         presetSelect.append(`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`);
     }
