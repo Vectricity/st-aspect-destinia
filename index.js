@@ -6,6 +6,7 @@ const EXTENSION_PROMPT_KEY = 'aspect_destinia_prompt';
 let remoteIntentEvalDisabled = false;
 let uiBusyCounter = 0;
 let busyIndicatorShownAt = 0;
+let pendingDiagnosticAttachments = [];
 
 
 const DEFAULT_TIMELINE_TEMPLATE = {
@@ -1229,6 +1230,33 @@ async function evaluateIntentIfNeeded(trigger = 'unknown') {
     return evaluateIntentIfNeededWithOptions(trigger, {});
 }
 
+function buildDiagnosticSnapshot(profile, trigger, overrides = {}) {
+    const currentPlotPoint = getCurrentPlotPoint(profile);
+    const nextPlotPoint = getNextPlotPoint(profile);
+
+    return {
+        updatedAt: Date.now(),
+        trigger,
+        recentChat: '',
+        evaluatorDecision: 'stay',
+        finalDecision: 'stay',
+        confidence: 0,
+        reason: 'No evaluation yet.',
+        plotPointComplete: false,
+        userWantsToLinger: false,
+        advancementMode: profile?.advancementMode || 'objectives',
+        currentPlotPointTitle: currentPlotPoint?.title || '',
+        currentPlotPointSummary: currentPlotPoint?.summary || '',
+        currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? structuredClone(currentPlotPoint.objectives) : [],
+        currentPlotPointHints: Array.isArray(currentPlotPoint?.completionHints) ? [...currentPlotPoint.completionHints] : [],
+        nextPlotPointTitle: nextPlotPoint?.title || 'None',
+        nextPlotPointSummary: nextPlotPoint?.summary || 'No next plot point.',
+        didAdvance: false,
+        advancedToPlotPointTitle: '',
+        ...overrides
+    };
+}
+
 async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = {}) {
     const { force = false, notify = false } = options;
     const ctx = getCtx();
@@ -1263,13 +1291,19 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         const parsed = await evaluateIntentModelOrFallback(ctx, prompt, profile, data.recent_chat);
 
         if (!parsed) {
+            const fallbackReason = 'Evaluation returned non-JSON; defaulted to stay.';
+            const diagnosticSnapshot = buildDiagnosticSnapshot(profile, trigger, {
+                recentChat: data.recent_chat,
+                reason: fallbackReason
+            });
             profile.state.lastIntentDecision = 'stay';
             profile.state.lastIntentConfidence = 0;
-            profile.state.lastIntentReason = 'Evaluation returned non-JSON; defaulted to stay.';
+            profile.state.lastIntentReason = fallbackReason;
+            profile.state.lastDiagnostic = diagnosticSnapshot;
             persistProfile(profile);
             updateExtensionPrompt();
             refreshUI();
-            return;
+            return diagnosticSnapshot;
         }
 
         const decision = parsed.decision === 'advance' ? 'advance' : 'stay';
@@ -1307,26 +1341,15 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             }
         }
 
-        const diagnosticSnapshot = {
-            updatedAt: Date.now(),
-            trigger,
+        const diagnosticSnapshot = buildDiagnosticSnapshot(profile, trigger, {
             recentChat: data.recent_chat,
             evaluatorDecision: decision,
             finalDecision,
             confidence,
             reason: String(parsed.reason || 'No reason provided.'),
             plotPointComplete,
-            userWantsToLinger,
-            advancementMode: profile.advancementMode,
-            currentPlotPointTitle: currentPlotPoint?.title || '',
-            currentPlotPointSummary: currentPlotPoint?.summary || '',
-            currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? structuredClone(currentPlotPoint.objectives) : [],
-            currentPlotPointHints: Array.isArray(currentPlotPoint?.completionHints) ? [...currentPlotPoint.completionHints] : [],
-            nextPlotPointTitle: getNextPlotPoint(profile)?.title || 'None',
-            nextPlotPointSummary: getNextPlotPoint(profile)?.summary || 'No next plot point.',
-            didAdvance: false,
-            advancedToPlotPointTitle: ''
-        };
+            userWantsToLinger
+        });
 
         profile.state.lastDiagnostic = diagnosticSnapshot;
 
@@ -1365,14 +1388,23 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
         updateExtensionPrompt();
         refreshUI();
         if (notify) toastr.success(`${MODULE_NAME}: intent check complete (${finalDecision}, ${confidence.toFixed(2)}).`);
+        return diagnosticSnapshot;
     } catch (err) {
         console.warn(`[${MODULE_NAME}] Intent evaluation failed`, err);
+        const fallbackReason = `Evaluation failed: ${err.message}`;
+        const diagnosticSnapshot = buildDiagnosticSnapshot(profile, trigger, {
+            recentChat: data.recent_chat,
+            reason: fallbackReason
+        });
         profile.state.lastIntentDecision = 'stay';
-        profile.state.lastIntentReason = `Evaluation failed: ${err.message}`;
+        profile.state.lastIntentConfidence = 0;
+        profile.state.lastIntentReason = fallbackReason;
+        profile.state.lastDiagnostic = diagnosticSnapshot;
         persistProfile(profile);
         updateExtensionPrompt();
         refreshUI();
         if (notify) toastr.error(`${MODULE_NAME}: intent check failed (${err.message}).`);
+        return diagnosticSnapshot;
     }
 }
 
@@ -1412,44 +1444,92 @@ function pruneChatDiagnosticStore() {
     return changed;
 }
 
-function findLatestAssistantMessageContext() {
+function getLatestAssistantMessageIndex(chat = getCtx().chat) {
+    const list = Array.isArray(chat) ? chat : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+        if (!list[i]?.is_user) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function getMessageElementByIndex(index) {
+    if (!Number.isInteger(index) || index < 0) return null;
+    return document.querySelector(`#chat .mes[mesid="${index}"]`)
+        || document.querySelector(`#chat .mes[data-mesid="${index}"]`)
+        || null;
+}
+
+function queuePendingDiagnosticAttachment(profile, diagnosticSnapshot) {
+    if (!profile?.enabled || !diagnosticSnapshot) return false;
+
     const ctx = getCtx();
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
-    let assistantIndex = -1;
-    for (let i = chat.length - 1; i >= 0; i--) {
-        if (!chat[i]?.is_user) {
-            assistantIndex = i;
-            break;
+    const assistantIndex = getLatestAssistantMessageIndex(chat);
+    const assistantMessage = assistantIndex >= 0 ? chat[assistantIndex] : null;
+    if (!assistantMessage || assistantMessage.is_user) return false;
+
+    const entry = {
+        chatKey: getChatKey(ctx),
+        index: assistantIndex,
+        profileId: profile.id,
+        messageSignature: getMessageSignature(assistantMessage),
+        diagnostic: structuredClone(diagnosticSnapshot)
+    };
+
+    pendingDiagnosticAttachments = pendingDiagnosticAttachments
+        .filter(item => !(item.chatKey === entry.chatKey && item.index === entry.index && item.messageSignature === entry.messageSignature));
+    pendingDiagnosticAttachments.push(entry);
+    pendingDiagnosticAttachments = pendingDiagnosticAttachments.slice(-20);
+    return true;
+}
+
+function getRenderedMessageIndex(renderedMessage = null) {
+    if (Number.isInteger(renderedMessage)) return renderedMessage;
+
+    if (typeof renderedMessage === 'string') {
+        const trimmed = renderedMessage.trim();
+        if (/^\d+$/.test(trimmed)) {
+            return Number(trimmed);
         }
+        return null;
     }
 
-    if (assistantIndex !== -1) {
-        const byAttr = document.querySelector(`#chat .mes[mesid="${assistantIndex}"]`)
-            || document.querySelector(`#chat .mes[data-mesid="${assistantIndex}"]`);
-        if (byAttr) {
-            return { element: byAttr, index: assistantIndex, message: chat[assistantIndex] };
-        }
-    }
-
-    const all = Array.from(document.querySelectorAll('#chat .mes'));
-    for (let i = all.length - 1; i >= 0; i--) {
-        const el = all[i];
-        const isUser =
-            el.classList.contains('user_mes')
-            || el.classList.contains('is_user')
-            || el.getAttribute('is_user') === 'true'
-            || el.dataset.isUser === 'true';
-        if (!isUser) {
-            const attrIndex = Number(el.getAttribute('mesid') ?? el.dataset.mesid);
-            return {
-                element: el,
-                index: Number.isInteger(attrIndex) ? attrIndex : -1,
-                message: Number.isInteger(attrIndex) ? chat[attrIndex] : null
-            };
+    if (renderedMessage && typeof renderedMessage === 'object') {
+        const candidates = [
+            renderedMessage.mesid,
+            renderedMessage.messageId,
+            renderedMessage.message_id,
+            renderedMessage.index,
+            renderedMessage.id
+        ];
+        for (const candidate of candidates) {
+            if (Number.isInteger(candidate)) return candidate;
+            if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) {
+                return Number(candidate.trim());
+            }
         }
     }
 
     return null;
+}
+
+function consumePendingDiagnosticAttachment(renderedMessage = null) {
+    const currentChatKey = getChatKey();
+    const renderedIndex = getRenderedMessageIndex(renderedMessage);
+
+    let pendingIndex = -1;
+    if (Number.isInteger(renderedIndex)) {
+        pendingIndex = pendingDiagnosticAttachments.findIndex(entry => entry.chatKey === currentChatKey && entry.index === renderedIndex);
+    }
+
+    if (pendingIndex === -1) {
+        pendingIndex = pendingDiagnosticAttachments.findIndex(entry => entry.chatKey === currentChatKey);
+    }
+
+    if (pendingIndex === -1) return null;
+    return pendingDiagnosticAttachments.splice(pendingIndex, 1)[0] || null;
 }
 
 function buildDiagnosticBoxHtml(diag = {}) {
@@ -1505,26 +1585,30 @@ function waitForNextFrame() {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-async function captureDiagnosticForLatestAssistantMessage() {
-    const profile = getActiveProfile();
-    const diag = profile?.state?.lastDiagnostic;
-    if (!profile?.enabled || !diag) return;
+async function captureDiagnosticForLatestAssistantMessage(renderedMessage = null) {
+    const pending = consumePendingDiagnosticAttachment(renderedMessage);
+    if (!pending) return false;
 
-    const latest = findLatestAssistantMessageContext();
-    if (!latest?.element || latest.index < 0 || !latest.message) return;
+    const ctx = getCtx();
+    const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
+    const message = chat[pending.index];
+    if (!message || getMessageSignature(message) !== String(pending.messageSignature || '')) {
+        return false;
+    }
 
     const store = getChatDiagnosticStore();
-    store[String(latest.index)] = {
-        profileId: profile.id,
-        messageSignature: getMessageSignature(latest.message),
-        diagnostic: structuredClone(diag)
+    store[String(pending.index)] = {
+        profileId: pending.profileId,
+        messageSignature: pending.messageSignature,
+        diagnostic: structuredClone(pending.diagnostic)
     };
     await saveChatMetadata();
+    return true;
 }
 
-async function captureAndRenderDiagnosticsForAssistantMessage() {
+async function captureAndRenderDiagnosticsForAssistantMessage(renderedMessage = null) {
     await waitForNextFrame();
-    await captureDiagnosticForLatestAssistantMessage();
+    await captureDiagnosticForLatestAssistantMessage(renderedMessage);
     await renderDiagnosticsForChat();
 }
 
@@ -1547,8 +1631,7 @@ async function renderDiagnosticsForChat() {
             const message = chat[index];
             if (!message || getMessageSignature(message) !== String(entry?.messageSignature || '')) return;
 
-            const el = document.querySelector(`#chat .mes[mesid="${index}"]`)
-                || document.querySelector(`#chat .mes[data-mesid="${index}"]`);
+            const el = getMessageElementByIndex(index);
             if (!el) return;
 
             const messageBody =
@@ -3181,6 +3264,7 @@ function renderRoot() {
 }
 
 async function onChatChanged() {
+    pendingDiagnosticAttachments = [];
     registerKnownChat();
     refreshUI();
     updateExtensionPrompt();
@@ -3194,15 +3278,19 @@ function bindEvents() {
         await evaluateIntentIfNeeded('user message');
     });
     ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
-        await evaluateIntentIfNeeded('assistant message');
+        const profile = getActiveProfile();
+        const diagnosticSnapshot = await evaluateIntentIfNeeded('assistant message');
+        if (profile?.enabled && diagnosticSnapshot) {
+            queuePendingDiagnosticAttachment(profile, diagnosticSnapshot);
+        }
+
+        if (!ctx.event_types.CHARACTER_MESSAGE_RENDERED) {
+            await captureAndRenderDiagnosticsForAssistantMessage();
+        }
     });
     if (ctx.event_types.CHARACTER_MESSAGE_RENDERED) {
-        ctx.eventSource.on(ctx.event_types.CHARACTER_MESSAGE_RENDERED, async () => {
-            await captureAndRenderDiagnosticsForAssistantMessage();
-        });
-    } else {
-        ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
-            await captureAndRenderDiagnosticsForAssistantMessage();
+        ctx.eventSource.on(ctx.event_types.CHARACTER_MESSAGE_RENDERED, async (renderedMessage) => {
+            await captureAndRenderDiagnosticsForAssistantMessage(renderedMessage);
         });
     }
     ctx.eventSource.on(ctx.event_types.APP_READY, async () => {
