@@ -1174,13 +1174,12 @@ function updateExtensionPrompt() {
 
         const promptTypes = ctx.extensionPromptTypes || SillyTavern.extensionPromptTypes || {};
         const promptRoles = ctx.extensionPromptRoles || SillyTavern.extensionPromptRoles || {};
-        const inPromptType = promptTypes.IN_PROMPT ?? 0;
+        const inPromptType = promptTypes.IN_PROMPT ?? promptTypes.BEFORE_PROMPT ?? promptTypes.AFTER_PROMPT ?? 0;
         const systemRole = promptRoles.SYSTEM ?? 0;
 
         /*
-         Use a stable, low-conflict insertion strategy.
-         The exact numeric position can be adjusted later if needed,
-         but this should work as a normal extension prompt.
+         Prefer injecting directly into the prompt block so the guidance
+         consistently reaches the generation request before chat history.
          */
         ctx.setExtensionPrompt(
             EXTENSION_PROMPT_KEY,
@@ -1502,6 +1501,10 @@ function bindDiagnosticToggle(inserted) {
     });
 }
 
+function waitForNextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 async function captureDiagnosticForLatestAssistantMessage() {
     const profile = getActiveProfile();
     const diag = profile?.state?.lastDiagnostic;
@@ -1517,6 +1520,12 @@ async function captureDiagnosticForLatestAssistantMessage() {
         diagnostic: structuredClone(diag)
     };
     await saveChatMetadata();
+}
+
+async function captureAndRenderDiagnosticsForAssistantMessage() {
+    await waitForNextFrame();
+    await captureDiagnosticForLatestAssistantMessage();
+    await renderDiagnosticsForChat();
 }
 
 async function renderDiagnosticsForChat() {
@@ -3186,9 +3195,16 @@ function bindEvents() {
     });
     ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
         await evaluateIntentIfNeeded('assistant message');
-        await captureDiagnosticForLatestAssistantMessage();
-        await renderDiagnosticsForChat();
     });
+    if (ctx.event_types.CHARACTER_MESSAGE_RENDERED) {
+        ctx.eventSource.on(ctx.event_types.CHARACTER_MESSAGE_RENDERED, async () => {
+            await captureAndRenderDiagnosticsForAssistantMessage();
+        });
+    } else {
+        ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
+            await captureAndRenderDiagnosticsForAssistantMessage();
+        });
+    }
     ctx.eventSource.on(ctx.event_types.APP_READY, async () => {
         renderRoot();
         await renderDiagnosticsForChat();
