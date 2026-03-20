@@ -1105,8 +1105,48 @@ function buildTemplateData(profile) {
         next_title: next.title || 'None',
         next_summary: next.summary || 'No next plot point.',
         strictness: Number(profile.strictness || 0).toFixed(2),
-        pacing_bias: Number(profile.pacingBias || 0).toFixed(2)
+        pacing_bias: Number(profile.pacingBias || 0).toFixed(2),
+        auto_advance_enabled: profile?.autoAdvance ? 'true' : 'false',
+        foreshadow_enabled: profile?.foreshadowNextPlotPoint ? 'true' : 'false',
+        respect_user_intent: profile?.respectUserIntent ? 'true' : 'false',
+        timeline_deviation_allowed: profile?.timelineDeviationAllowed ? 'true' : 'false',
+        auto_resolve_deviation: profile?.autoResolveDeviation ? 'true' : 'false',
+        advancement_mode: profile?.advancementMode || 'objectives',
+        transition_threshold: Number(profile?.transitionThreshold ?? 0.72).toFixed(2),
+        objective_auto_advance_threshold: Number(getObjectiveCompletionThreshold(profile)).toFixed(2),
+        intent_window: String(profile?.intentWindow || 8)
     };
+}
+
+function buildSettingsGuidance(profile, data) {
+    const lines = [
+        `Extension settings in effect: advancement mode=${data.advancement_mode}, auto-advance=${data.auto_advance_enabled}, foreshadowing=${data.foreshadow_enabled}, respect-user-intent=${data.respect_user_intent}, timeline-deviation-allowed=${data.timeline_deviation_allowed}, auto-resolve-deviation=${data.auto_resolve_deviation}.`,
+        `Evaluator transition threshold=${data.transition_threshold}; objective auto-advance threshold=${data.objective_auto_advance_threshold}; evaluator intent window=${data.intent_window} recent messages.`
+    ];
+
+    if (!profile?.autoAdvance) {
+        lines.push('Automatic advancement is disabled. Keep the narration grounded in the current plot point and do not proactively complete a full transition unless later guidance explicitly changes state.');
+    }
+
+    if (!profile?.foreshadowNextPlotPoint) {
+        lines.push('Foreshadowing is disabled. Do not seed hints, previews, or setup for the next plot point until the transition is actually allowed.');
+    }
+
+    if (!profile?.respectUserIntent) {
+        lines.push('Respect User Intent is disabled. Do not treat inferred user pacing preferences alone as a reason to linger or accelerate; prioritize the configured plot guidance and explicit extension instructions instead.');
+    }
+
+    if (profile?.timelineDeviationAllowed) {
+        lines.push('Timeline deviation is allowed when roleplay meaningfully pushes off-script, but any divergence must remain coherent with what has already happened.');
+    } else {
+        lines.push('Timeline deviation is not allowed. Keep scenes aligned with the configured current plot point and transition guidance.');
+    }
+
+    if (profile?.autoResolveDeviation) {
+        lines.push('If drift happens, actively guide the scene back into a coherent timeline state without breaking immersion.');
+    }
+
+    return lines.join('\n');
 }
 
 function buildInjection(profile) {
@@ -1132,18 +1172,25 @@ function buildInjection(profile) {
     }
 
     chunks.push(replaceMacros(prompts.pacingInstruction, data));
+    chunks.push(buildSettingsGuidance(profile, data));
 
-    if (profile.respectUserIntent && profile.state.lastIntentDecision === 'advance') {
-        chunks.push(prompts.advanceInstruction || '');
-    } else {
-        chunks.push(prompts.lingerInstruction || '');
+    if (profile.respectUserIntent) {
+        if (profile.state.lastIntentDecision === 'advance') {
+            chunks.push(prompts.advanceInstruction || '');
+        } else {
+            chunks.push(prompts.lingerInstruction || '');
+        }
+
+        if (profile.state.lastIntentReason) {
+            chunks.push(`Most recent intent reasoning: ${profile.state.lastIntentReason}`);
+        }
+    } else if (profile.state.lastIntentReason) {
+        chunks.push(`Latest evaluator note (informational only because Respect User Intent is disabled): ${profile.state.lastIntentReason}`);
     }
 
-    if (profile.state.lastIntentReason) {
-        chunks.push(`Most recent intent reasoning: ${profile.state.lastIntentReason}`);
-    }
-
-    if (profile.autoResolveDeviation) {
+    if (profile.timelineDeviationAllowed && !profile.autoResolveDeviation) {
+        chunks.push('Timeline Deviation Handling: ALLOWED. If the story moves off the configured path through meaningful roleplay, continue naturally without forcing an immediate reset, while keeping continuity intact.');
+    } else if (profile.autoResolveDeviation) {
         if (profile.timelineDeviationAllowed) {
             chunks.push('Timeline Deviation Handling: ALLOWED. If the user meaningfully deviates from the planned timeline, adapt the timeline structure in a realistic way. Update plot point order/details and objective wording so the revised timeline reflects what happened naturally in-scene. Keep changes coherent, causal, and narratively rational.');
         } else {
@@ -1245,6 +1292,20 @@ function buildDiagnosticSnapshot(profile, trigger, overrides = {}) {
         plotPointComplete: false,
         userWantsToLinger: false,
         advancementMode: profile?.advancementMode || 'objectives',
+        autoAdvance: !!profile?.autoAdvance,
+        foreshadowNextPlotPoint: !!profile?.foreshadowNextPlotPoint,
+        respectUserIntent: !!profile?.respectUserIntent,
+        timelineDeviationAllowed: !!profile?.timelineDeviationAllowed,
+        autoResolveDeviation: !!profile?.autoResolveDeviation,
+        strictness: Number(profile?.strictness ?? 0.55),
+        pacingBias: Number(profile?.pacingBias ?? 0.45),
+        transitionThreshold: Number(profile?.transitionThreshold ?? 0.72),
+        objectiveAutoAdvanceThreshold: Number(getObjectiveCompletionThreshold(profile)),
+        intentWindow: Number(profile?.intentWindow || 8),
+        evaluatorConnectionProfile: String(profile?.llmConnectionProfile || ''),
+        evaluatorPreset: String(profile?.llmPreset || ''),
+        objectiveCompletionRatio: 0,
+        objectiveReadyToAdvance: false,
         currentPlotPointTitle: currentPlotPoint?.title || '',
         currentPlotPointSummary: currentPlotPoint?.summary || '',
         currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? structuredClone(currentPlotPoint.objectives) : [],
@@ -1364,6 +1425,9 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             profile.advancementMode === 'objectives' &&
             updatedObjectives.length > 0 &&
             objectiveCompletionRatio >= getObjectiveCompletionThreshold(profile);
+
+        diagnosticSnapshot.objectiveCompletionRatio = objectiveCompletionRatio;
+        diagnosticSnapshot.objectiveReadyToAdvance = objectiveReadyToAdvance;
 
         const canAdvance =
             profile.autoAdvance &&
@@ -1496,20 +1560,55 @@ function getRenderedMessageIndex(renderedMessage = null) {
         return null;
     }
 
+    const parseIndexCandidate = (candidate) => {
+        if (Number.isInteger(candidate)) return candidate;
+        if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) {
+            return Number(candidate.trim());
+        }
+        return null;
+    };
+
+    const parseIndexFromElement = (element) => {
+        if (!(element instanceof Element)) return null;
+        const messageElement = element.matches('.mes') ? element : element.closest('.mes');
+        if (!messageElement) return null;
+
+        return parseIndexCandidate(messageElement.getAttribute('mesid'))
+            ?? parseIndexCandidate(messageElement.getAttribute('data-mesid'))
+            ?? parseIndexCandidate(messageElement.dataset?.mesid)
+            ?? null;
+    };
+
     if (renderedMessage && typeof renderedMessage === 'object') {
         const candidates = [
             renderedMessage.mesid,
             renderedMessage.messageId,
             renderedMessage.message_id,
             renderedMessage.index,
-            renderedMessage.id
+            renderedMessage.id,
+            renderedMessage?.detail?.mesid,
+            renderedMessage?.detail?.messageId,
+            renderedMessage?.detail?.message_id,
+            renderedMessage?.detail?.index,
+            renderedMessage?.detail?.id,
+            renderedMessage?.target?.getAttribute?.('mesid'),
+            renderedMessage?.target?.getAttribute?.('data-mesid'),
+            renderedMessage?.currentTarget?.getAttribute?.('mesid'),
+            renderedMessage?.currentTarget?.getAttribute?.('data-mesid')
         ];
         for (const candidate of candidates) {
-            if (Number.isInteger(candidate)) return candidate;
-            if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) {
-                return Number(candidate.trim());
-            }
+            const parsed = parseIndexCandidate(candidate);
+            if (parsed !== null) return parsed;
         }
+
+        const jqueryCandidate = renderedMessage?.jquery ? renderedMessage[0] : null;
+        return parseIndexFromElement(renderedMessage)
+            ?? parseIndexFromElement(renderedMessage?.detail?.message)
+            ?? parseIndexFromElement(renderedMessage?.detail?.element)
+            ?? parseIndexFromElement(renderedMessage?.target)
+            ?? parseIndexFromElement(renderedMessage?.currentTarget)
+            ?? parseIndexFromElement(jqueryCandidate)
+            ?? null;
     }
 
     return null;
@@ -1534,6 +1633,29 @@ function consumePendingDiagnosticAttachment(renderedMessage = null) {
 
 function buildDiagnosticBoxHtml(diag = {}) {
     const infoUsed = [];
+    const settingsLines = [
+        `Mode: ${escapeHtml(diag.advancementMode || 'objectives')}`,
+        `Auto-advance: ${diag.autoAdvance ? 'on' : 'off'}`,
+        `Foreshadowing: ${diag.foreshadowNextPlotPoint ? 'on' : 'off'}`,
+        `Respect intent: ${diag.respectUserIntent ? 'on' : 'off'}`,
+        `Deviation allowed: ${diag.timelineDeviationAllowed ? 'yes' : 'no'}`,
+        `Auto-resolve deviation: ${diag.autoResolveDeviation ? 'yes' : 'no'}`,
+        `Strictness: ${formatPercent(diag.strictness || 0)}`,
+        `Pacing bias: ${formatPercent(diag.pacingBias || 0)}`,
+        `Transition threshold: ${formatPercent(diag.transitionThreshold || 0)}`,
+        `Objective auto-advance threshold: ${formatPercent(diag.objectiveAutoAdvanceThreshold || 0)}`,
+        `Intent window: ${escapeHtml(String(diag.intentWindow || 0))}`,
+        `Evaluator connection: ${escapeHtml(diag.evaluatorConnectionProfile || 'Active connection profile')}`,
+        `Evaluator preset: ${escapeHtml(diag.evaluatorPreset || 'Active chat completion preset')}`
+    ];
+
+    if (typeof diag.objectiveCompletionRatio === 'number' && Number.isFinite(diag.objectiveCompletionRatio)) {
+        settingsLines.push(`Objective completion: ${formatPercent(diag.objectiveCompletionRatio)}`);
+        settingsLines.push(`Objective auto-advance ready: ${diag.objectiveReadyToAdvance ? 'yes' : 'no'}`);
+    }
+
+    infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Settings in effect:</b> ${settingsLines.join(' | ')}</div>`);
+
     if (Array.isArray(diag.currentPlotPointObjectives) && diag.currentPlotPointObjectives.length) {
         const objectivesHtml = diag.currentPlotPointObjectives
             .map(item => {
@@ -1554,7 +1676,7 @@ function buildDiagnosticBoxHtml(diag = {}) {
     return `
         <div class="aspect-destinia-diagnostic-container" data-collapsed="true">
             <div class="aspect-destinia-diagnostic-header">
-                <button class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-hourglass-half"></i></button>
+                <button type="button" class="aspect-destinia-diagnostic-toggle" title="Toggle diagnostic visibility"><i class="fa-solid fa-hourglass-half"></i></button>
                 <div class="aspect-destinia-diagnostic-timeline-label">Timeline (Diagnostics)</div>
             </div>
             <div class="aspect-destinia-diagnostic-box">
@@ -1636,12 +1758,19 @@ async function renderDiagnosticsForChat() {
 
             const messageBody =
                 el.querySelector('.mes_text')
-                || el.querySelector('.message_text')
-                || el.querySelector('.mes_block')
+                || el.querySelector('.message_text');
+            const fallbackContainer =
+                el.querySelector('.mes_block')
                 || el;
 
-            messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(entry?.diagnostic || {}));
-            bindDiagnosticToggle(messageBody.querySelector('.aspect-destinia-diagnostic-container:last-of-type'));
+            if (messageBody) {
+                messageBody.insertAdjacentHTML('afterend', buildDiagnosticBoxHtml(entry?.diagnostic || {}));
+                bindDiagnosticToggle(messageBody.parentElement?.querySelector('.aspect-destinia-diagnostic-container:last-of-type'));
+                return;
+            }
+
+            fallbackContainer.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(entry?.diagnostic || {}));
+            bindDiagnosticToggle(fallbackContainer.querySelector('.aspect-destinia-diagnostic-container:last-of-type'));
         });
 }
 
