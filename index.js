@@ -1308,23 +1308,28 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             }
         }
 
-        profile.state.lastDiagnostic = {
+        const diagnosticSnapshot = {
             updatedAt: Date.now(),
             trigger,
             recentChat: data.recent_chat,
             evaluatorDecision: decision,
             finalDecision,
             confidence,
+            reason: String(parsed.reason || 'No reason provided.'),
             plotPointComplete,
             userWantsToLinger,
             advancementMode: profile.advancementMode,
             currentPlotPointTitle: currentPlotPoint?.title || '',
             currentPlotPointSummary: currentPlotPoint?.summary || '',
-            currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? currentPlotPoint.objectives : [],
-            currentPlotPointHints: Array.isArray(currentPlotPoint?.completionHints) ? currentPlotPoint.completionHints : [],
+            currentPlotPointObjectives: Array.isArray(currentPlotPoint?.objectives) ? structuredClone(currentPlotPoint.objectives) : [],
+            currentPlotPointHints: Array.isArray(currentPlotPoint?.completionHints) ? [...currentPlotPoint.completionHints] : [],
             nextPlotPointTitle: getNextPlotPoint(profile)?.title || 'None',
-            nextPlotPointSummary: getNextPlotPoint(profile)?.summary || 'No next plot point.'
+            nextPlotPointSummary: getNextPlotPoint(profile)?.summary || 'No next plot point.',
+            didAdvance: false,
+            advancedToPlotPointTitle: ''
         };
+
+        profile.state.lastDiagnostic = diagnosticSnapshot;
 
         const updatedPlotPoint = getCurrentPlotPoint(profile);
         const updatedObjectives = Array.isArray(updatedPlotPoint?.objectives)
@@ -1352,6 +1357,8 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
             profile.state.lastTransitionAt = Date.now();
             const newPlotPoint = getCurrentPlotPoint(profile);
             profile.state.lastIntentReason = `Advanced after ${trigger}: ${profile.state.lastIntentReason}`;
+            diagnosticSnapshot.didAdvance = true;
+            diagnosticSnapshot.advancedToPlotPointTitle = newPlotPoint?.title || 'next plot point';
             toastr.info(`${MODULE_NAME}: moved to "${newPlotPoint?.title || 'next plot point'}".`);
         }
 
@@ -1370,7 +1377,43 @@ async function evaluateIntentIfNeededWithOptions(trigger = 'unknown', options = 
     }
 }
 
-function findLatestAssistantMessageElement() {
+function getMessageSignature(message) {
+    if (!message || typeof message !== 'object') return '';
+    return [
+        String(message.name || ''),
+        String(message.mes || message.message || message.text || ''),
+        message.is_user ? 'user' : 'assistant'
+    ].join('::').slice(0, 1000);
+}
+
+function getChatDiagnosticStore() {
+    const metadata = getMetadataBucket();
+    if (!metadata.messageDiagnostics || typeof metadata.messageDiagnostics !== 'object') {
+        metadata.messageDiagnostics = {};
+    }
+    return metadata.messageDiagnostics;
+}
+
+function pruneChatDiagnosticStore() {
+    const ctx = getCtx();
+    const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
+    const store = getChatDiagnosticStore();
+    let changed = false;
+
+    Object.keys(store).forEach((key) => {
+        const index = Number(key);
+        const entry = store[key];
+        const message = Number.isInteger(index) ? chat[index] : null;
+        if (!message || getMessageSignature(message) !== String(entry?.messageSignature || '')) {
+            delete store[key];
+            changed = true;
+        }
+    });
+
+    return changed;
+}
+
+function findLatestAssistantMessageContext() {
     const ctx = getCtx();
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
     let assistantIndex = -1;
@@ -1384,7 +1427,9 @@ function findLatestAssistantMessageElement() {
     if (assistantIndex !== -1) {
         const byAttr = document.querySelector(`#chat .mes[mesid="${assistantIndex}"]`)
             || document.querySelector(`#chat .mes[data-mesid="${assistantIndex}"]`);
-        if (byAttr) return byAttr;
+        if (byAttr) {
+            return { element: byAttr, index: assistantIndex, message: chat[assistantIndex] };
+        }
     }
 
     const all = Array.from(document.querySelectorAll('#chat .mes'));
@@ -1395,16 +1440,20 @@ function findLatestAssistantMessageElement() {
             || el.classList.contains('is_user')
             || el.getAttribute('is_user') === 'true'
             || el.dataset.isUser === 'true';
-        if (!isUser) return el;
+        if (!isUser) {
+            const attrIndex = Number(el.getAttribute('mesid') ?? el.dataset.mesid);
+            return {
+                element: el,
+                index: Number.isInteger(attrIndex) ? attrIndex : -1,
+                message: Number.isInteger(attrIndex) ? chat[attrIndex] : null
+            };
+        }
     }
 
     return null;
 }
 
-function buildDiagnosticBoxHtml(profile) {
-    const current = getCurrentPlotPoint(profile);
-    const next = getNextPlotPoint(profile);
-    const diag = profile?.state?.lastDiagnostic || {};
+function buildDiagnosticBoxHtml(diag = {}) {
     const infoUsed = [];
     if (Array.isArray(diag.currentPlotPointObjectives) && diag.currentPlotPointObjectives.length) {
         const objectivesHtml = diag.currentPlotPointObjectives
@@ -1419,6 +1468,9 @@ function buildDiagnosticBoxHtml(profile) {
     if (Array.isArray(diag.currentPlotPointHints) && diag.currentPlotPointHints.length) {
         infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Completion hints:</b> ${escapeHtml(diag.currentPlotPointHints.join(' | '))}</div>`);
     }
+    if (diag.didAdvance) {
+        infoUsed.push(`<div><b class="aspect-destinia-diagnostic-sand">Transition result:</b> Advanced to ${escapeHtml(diag.advancedToPlotPointTitle || 'the next plot point')}.</div>`);
+    }
 
     return `
         <div class="aspect-destinia-diagnostic-container" data-collapsed="true">
@@ -1428,10 +1480,10 @@ function buildDiagnosticBoxHtml(profile) {
             </div>
             <div class="aspect-destinia-diagnostic-box">
             <div class="aspect-destinia-diagnostic-content">
-                <div><b class="aspect-destinia-diagnostic-sand">Current story plot point:</b> ${escapeHtml(current?.title || 'None')}</div>
-                <div><b class="aspect-destinia-diagnostic-sand">Next story plot point:</b> ${escapeHtml(next?.title || 'None')}</div>
-                <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(profile?.state?.lastIntentDecision || 'stay')} (${formatPercent(profile?.state?.lastIntentConfidence || 0)})</div>
-                <div><b class="aspect-destinia-diagnostic-sand">Reason:</b> ${escapeHtml(profile?.state?.lastIntentReason || 'No evaluation yet.')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Current story plot point:</b> ${escapeHtml(diag.currentPlotPointTitle || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Next story plot point:</b> ${escapeHtml(diag.nextPlotPointTitle || 'None')}</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Intent decision:</b> ${escapeHtml(diag.finalDecision || 'stay')} (${formatPercent(diag.confidence || 0)})</div>
+                <div><b class="aspect-destinia-diagnostic-sand">Reason:</b> ${escapeHtml(diag.reason || 'No evaluation yet.')}</div>
                 <details>
                     <summary><b>Information used for this response</b></summary>
                     <div class="aspect-destinia-diagnostic-body">${infoUsed.join('') || 'No diagnostics captured yet.'}</div>
@@ -1442,28 +1494,63 @@ function buildDiagnosticBoxHtml(profile) {
     `;
 }
 
-function renderDiagnosticForLatestAssistantMessage() {
-    const profile = getActiveProfile();
-    if (!profile?.enabled) return;
-    const el = findLatestAssistantMessageElement();
-    if (!el) return;
-
-    el.querySelectorAll('.aspect-destinia-diagnostic-container').forEach(x => x.remove());
-
-    const messageBody =
-        el.querySelector('.mes_text')
-        || el.querySelector('.message_text')
-        || el.querySelector('.mes_block')
-        || el;
-
-    messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(profile));
-
-    const inserted = messageBody.querySelector('.aspect-destinia-diagnostic-container:last-of-type');
+function bindDiagnosticToggle(inserted) {
     const toggle = inserted?.querySelector('.aspect-destinia-diagnostic-toggle');
     toggle?.addEventListener('click', () => {
         const collapsed = inserted.getAttribute('data-collapsed') === 'true';
         inserted.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
     });
+}
+
+async function captureDiagnosticForLatestAssistantMessage() {
+    const profile = getActiveProfile();
+    const diag = profile?.state?.lastDiagnostic;
+    if (!profile?.enabled || !diag) return;
+
+    const latest = findLatestAssistantMessageContext();
+    if (!latest?.element || latest.index < 0 || !latest.message) return;
+
+    const store = getChatDiagnosticStore();
+    store[String(latest.index)] = {
+        profileId: profile.id,
+        messageSignature: getMessageSignature(latest.message),
+        diagnostic: structuredClone(diag)
+    };
+    await saveChatMetadata();
+}
+
+async function renderDiagnosticsForChat() {
+    const storeChanged = pruneChatDiagnosticStore();
+    if (storeChanged) {
+        await saveChatMetadata();
+    }
+
+    document.querySelectorAll('#chat .aspect-destinia-diagnostic-container').forEach(x => x.remove());
+
+    const ctx = getCtx();
+    const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
+    const store = getChatDiagnosticStore();
+
+    Object.entries(store)
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .forEach(([key, entry]) => {
+            const index = Number(key);
+            const message = chat[index];
+            if (!message || getMessageSignature(message) !== String(entry?.messageSignature || '')) return;
+
+            const el = document.querySelector(`#chat .mes[mesid="${index}"]`)
+                || document.querySelector(`#chat .mes[data-mesid="${index}"]`);
+            if (!el) return;
+
+            const messageBody =
+                el.querySelector('.mes_text')
+                || el.querySelector('.message_text')
+                || el.querySelector('.mes_block')
+                || el;
+
+            messageBody.insertAdjacentHTML('beforeend', buildDiagnosticBoxHtml(entry?.diagnostic || {}));
+            bindDiagnosticToggle(messageBody.querySelector('.aspect-destinia-diagnostic-container:last-of-type'));
+        });
 }
 
 function parseJsonObject(text) {
@@ -2507,8 +2594,12 @@ async function clearCurrentChatMessages() {
             ctx.saveChatDebounced();
         }
 
+        const metadata = getMetadataBucket();
+        delete metadata.messageDiagnostics;
+        await saveChatMetadata();
+
         toastr.success(`${MODULE_NAME}: deleted ${count} message(s) from the current chat.`);
-        renderDiagnosticForLatestAssistantMessage();
+        await renderDiagnosticsForChat();
     } catch (err) {
         toastr.error(`${MODULE_NAME}: failed to clear current chat (${err.message}).`);
     }
@@ -3080,11 +3171,11 @@ function renderRoot() {
     refreshUI();
 }
 
-function onChatChanged() {
+async function onChatChanged() {
     registerKnownChat();
     refreshUI();
     updateExtensionPrompt();
-    renderDiagnosticForLatestAssistantMessage();
+    await renderDiagnosticsForChat();
 }
 
 function bindEvents() {
@@ -3095,10 +3186,12 @@ function bindEvents() {
     });
     ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
         await evaluateIntentIfNeeded('assistant message');
-        renderDiagnosticForLatestAssistantMessage();
+        await captureDiagnosticForLatestAssistantMessage();
+        await renderDiagnosticsForChat();
     });
-    ctx.eventSource.on(ctx.event_types.APP_READY, () => {
+    ctx.eventSource.on(ctx.event_types.APP_READY, async () => {
         renderRoot();
+        await renderDiagnosticsForChat();
     });
 }
 
@@ -3115,6 +3208,6 @@ jQuery(async () => {
 
     refreshUI();
     updateExtensionPrompt();
-    renderDiagnosticForLatestAssistantMessage();
+    await renderDiagnosticsForChat();
     console.log(`[${MODULE_NAME}] loaded`);
 });
