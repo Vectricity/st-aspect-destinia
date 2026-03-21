@@ -1201,10 +1201,31 @@ function buildInjection(profile) {
     return chunks.filter(Boolean).join('\n\n');
 }
 
+function getActivePromptProfile() {
+    const activeProfile = getActiveProfile();
+    if (!activeProfile) return null;
+
+    const displayedProfile = getDisplayedProfile();
+    const isEditingActiveProfile = displayedProfile?.id && displayedProfile.id === activeProfile.id;
+    const hasRenderedSettings = !!document.getElementById(ROOT_ID);
+
+    if (!isEditingActiveProfile || !hasRenderedSettings) {
+        return activeProfile;
+    }
+
+    try {
+        const draftProfile = structuredClone(activeProfile);
+        formToProfile(draftProfile);
+        return draftProfile;
+    } catch {
+        return activeProfile;
+    }
+}
+
 function updateExtensionPrompt() {
     try {
         const ctx = getCtx();
-        const profile = getActiveProfile();
+        const profile = getActivePromptProfile();
 
         if (!profile?.enabled) {
             if (typeof ctx.setExtensionPrompt === 'function') {
@@ -3377,6 +3398,9 @@ function bindUI() {
     $('#aspect_destinia_strictness, #aspect_destinia_pacing, #aspect_destinia_threshold, #aspect_destinia_objective_threshold').on('input', updateSliderDisplays);
     $(Object.keys(TEMPLATE_VALIDATION_RULES).map(id => `#${id}`).join(', ')).on('input change', updateFieldValidationIndicators);
     $('#aspect_destinia_timeline').on('input change', updateCurrentObjectivesPreview);
+    $('#aspect_destinia_root textarea, #aspect_destinia_root select, #aspect_destinia_root input:not([type="file"]), #aspect_destinia_root button').not(
+        '#aspect_destinia_save, #aspect_destinia_export, #aspect_destinia_import, #aspect_destinia_import_file, #aspect_destinia_timeline_export, #aspect_destinia_timeline_import, #aspect_destinia_timeline_import_file, #aspect_destinia_timeline_preset_create, #aspect_destinia_timeline_preset_save, #aspect_destinia_timeline_preset_duplicate, #aspect_destinia_timeline_preset_delete, #aspect_destinia_create, #aspect_destinia_rename, #aspect_destinia_duplicate, #aspect_destinia_delete, #aspect_destinia_attach_current, #aspect_destinia_prev, #aspect_destinia_next, #aspect_destinia_reset_plot_point, #aspect_destinia_clear_chat'
+    ).on('input change click', updateExtensionPrompt);
 
     setupInfoTooltips();
     addFieldResetButtons();
