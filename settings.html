@@ -1,0 +1,371 @@
+<div id="aspect_destinia_settings" class="aspect_destinia_settings_content">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>Aspect: Destinia</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div id="aspect_destinia_root" class="aspect-destinia">
+                <div class="aspect-destinia-panel">
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-toolbar-top aspect-destinia-profile-controls">
+                            <div class="aspect-destinia-field aspect-destinia-grow">
+                                <div class="aspect-destinia-mini-heading">The Aspect of Destiny</div>
+                                <div class="checkbox_label"><input id="dest_enabled" type="checkbox" /><span class="aspect-destinia-label"><label for="dest_enabled" class="aspect-destinia-checkbox-label-text">Extension Enabled</label></span></div>
+                            </div>
+                            <div class="aspect-destinia-field aspect-destinia-grow">
+                                <label class="aspect-destinia-label">Profile</label>
+                                <div class="aspect-destinia-entry-picker-row">
+                                    <div class="aspect-destinia-select-wrap">
+                                        <select id="profile"></select>
+                                        <span class="aspect-destinia-select-arrow">▾</span>
+                                    </div>
+                                    <button id="rename_profile" class="menu_button aspect-destinia-icon-button" title="Rename profile" aria-label="Rename profile"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                                </div>
+                            </div>
+                            <div class="aspect-destinia-field aspect-destinia-grow">
+                                <label class="aspect-destinia-label">Current Chat</label>
+                                <div class="aspect-destinia-entry-picker-row">
+                                    <div class="aspect-destinia-select-wrap">
+                                        <select id="chat_profile_select"></select>
+                                        <span class="aspect-destinia-select-arrow">▾</span>
+                                    </div>
+                                    <button id="character_profile" class="menu_button interactable" title="Auto-load profile for current character"><i class="fa-solid fa-unlock" style="margin-right: 1em"></i>Character</button>
+                                    <button id="chat_profile" class="menu_button interactable" title="Auto-load profile for current chat"><i class="fa-solid fa-unlock" style="margin-right: 1em"></i>Chat</button>
+                                </div>
+                            </div>
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row aspect-destinia-profile-button-row-primary">
+                                <button id="new_profile" class="menu_button">Create Profile</button>
+                                <button id="save_profile" class="menu_button menu_button_primary">Save Profile</button>
+                                <button id="duplicate_profile" class="menu_button">Duplicate Profile</button>
+                                <button id="delete_profile" class="menu_button menu_button_danger">Delete Profile</button>
+                            </div>
+                            <div class="aspect-destinia-toolbar aspect-destinia-profile-button-row">
+                                <button id="toggle_chat_guidance" class="menu_button">Attach Current Chat</button>
+                                <button id="export_profile" class="menu_button">Export Profile</button>
+                                <button id="import_profile" class="menu_button">Import Profile</button>
+                                <input id="import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
+                                <button id="aspect_destinia_popout_button" class="menu_button aspect-destinia-icon-button" title="Move config to floating popout" aria-label="Move config to floating popout"><i class="fa-solid fa-window-restore" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Evaluator Connection Profile</label>
+                                <select id="evaluator_connection_profile"></select>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Evaluator Chat Completion Preset</label>
+                                <select id="evaluator_preset"></select>
+                            </div>
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
+                            <input id="intent_window" type="number" min="4" max="20" step="1" />
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Messages Evaluated</label>
+                            <div class="radio_group">
+                                <label><input type="radio" name="messages_evaluated" value="user" /><span>User</span></label>
+                                <label><input type="radio" name="messages_evaluated" value="assistant" /><span>Assistant</span></label>
+                                <label><input type="radio" name="messages_evaluated" value="both" /><span>Both</span></label>
+                            </div>
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <button id="clear_chat" class="menu_button menu_button_danger">Delete Messages</button>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <div class="aspect-destinia-section-title">Timeline</div>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="timeline_text" hidden title="">⚠️</span>
+                            </div>
+                            <textarea id="timeline_text" class="aspect-destinia-code"></textarea>
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Timeline Preset</label>
+                            <div class="aspect-destinia-entry-picker-row">
+                                <div class="aspect-destinia-select-wrap">
+                                    <select id="timeline_preset"></select>
+                                    <span class="aspect-destinia-select-arrow">▾</span>
+                                </div>
+                                <button id="timeline_preset_rename" class="menu_button aspect-destinia-icon-button" title="Rename timeline preset" aria-label="Rename timeline preset"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                        <div class="aspect-destinia-actions">
+                            <button id="timeline_preset_create" class="menu_button">Create Preset</button>
+                            <button id="timeline_preset_save" class="menu_button menu_button_primary">Save Preset</button>
+                            <button id="timeline_preset_duplicate" class="menu_button">Duplicate Preset</button>
+                            <button id="timeline_preset_delete" class="menu_button menu_button_danger">Delete Preset</button>
+                        </div>
+                        <div class="aspect-destinia-actions">
+                            <button id="timeline_export" class="menu_button">Export</button>
+                            <button id="timeline_import" class="menu_button">Import</button>
+                            <input id="timeline_import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
+                        </div>
+                        <div class="aspect-destinia-grid three">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Timeline Deviation</label>
+                                <div class="checkbox_label"><input id="timeline_deviation_allowed" type="checkbox" /><label for="timeline_deviation_allowed" class="aspect-destinia-checkbox-label-text">Allowed</label></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Timeline Deviation Auto-Resolve</label>
+                                <div class="checkbox_label"><input id="auto_resolve_deviation" type="checkbox" /><label for="auto_resolve_deviation" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Detach</label>
+                                <div class="checkbox_label"><input id="detach_enabled" type="checkbox" /><label for="detach_enabled" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
+                            </div>
+                        </div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Detach Instruction</label>
+                            <textarea id="detach_instruction"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-grid three">
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Objective Auto-Advance</label>
+                                <div class="checkbox_label"><input id="auto_advance" type="checkbox" /><label for="auto_advance" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Objective Auto-Advance Threshold</label>
+                                <input id="objective_auto_advance_threshold" type="range" min="0.5" max="1" step="0.05" />
+                                <div class="aspect-destinia-slider-meta"><span id="objective_auto_advance_threshold_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Objective Evaluation Method</label>
+                                <select id="objective_evaluation_method">
+                                    <option value="integrated">Integrated</option>
+                                    <option value="per_objective">Per Objective</option>
+                                </select>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Point Transition Threshold</label>
+                                <input id="transition_threshold" type="range" min="0.5" max="0.95" step="0.01" />
+                                <div class="aspect-destinia-slider-meta"><span id="transition_threshold_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Progression Rules</label>
+                                <select id="advancement_mode">
+                                    <option value="objectives">Objective-based</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-actions">
+                            <button id="plot_point_first" class="menu_button">First Plot Point</button>
+                            <button id="plot_point_prev" class="menu_button">Previous Plot Point</button>
+                            <button id="plot_point_next" class="menu_button">Next Plot Point</button>
+                        </div>
+
+                        <div class="aspect-destinia-grid three sliders">
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Alignment Strictness</label>
+                                <input id="strictness" type="range" min="0" max="1" step="0.01" />
+                                <div class="aspect-destinia-slider-meta"><span id="strictness_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Progression Aggressiveness</label>
+                                <input id="pacing_bias" type="range" min="0" max="1" step="0.01" />
+                                <div class="aspect-destinia-slider-meta"><span id="pacing_bias_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Plot Foreshadowing</label>
+                                <div class="checkbox_label"><input id="foreshadow_next_plot_point" type="checkbox" /><label for="foreshadow_next_plot_point" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
+                            </div>
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Plot Stagnation</label>
+                                <div class="checkbox_label"><input id="respect_user_intent" type="checkbox" /><label for="respect_user_intent" class="aspect-destinia-checkbox-label-text">Allowed</label></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Status</div>
+                        <div id="aspect_destinia_status"></div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Injected Guidance Fields</div>
+
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Injection Intro</label>
+                            </div>
+                            <textarea id="guidance_intro"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Guidance Principles</label>
+                            </div>
+                            <textarea id="guidance_principles"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Current Plot Point Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="current_plot_point_template" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="current_plot_point_template"></textarea>
+                            </div>
+
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Next Plot Point Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="next_plot_point_template" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="next_plot_point_template"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Transition Template</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="transition_template" hidden title="">⚠️</span>
+                            </div>
+                            <textarea id="transition_template"></textarea>
+                        </div>
+
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Objective Mode Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="objective_mode_template" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="objective_mode_template"></textarea>
+                            </div>
+
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Stagnation Instruction</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="stagnation_instruction" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="stagnation_instruction"></textarea>
+                            </div>
+
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Progression Instruction</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="progression_instruction" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="progression_instruction"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-field">
+                            <div class="aspect-destinia-label-row">
+                                <label class="aspect-destinia-label">Pacing Instruction</label>
+                                <span class="aspect-destinia-warning-icon" data-validation-for="pacing_instruction" hidden title="">⚠️</span>
+                            </div>
+                            <textarea id="pacing_instruction"></textarea>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Objective Completion Guidance</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="objective_completion_guidance" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="objective_completion_guidance"></textarea>
+                            </div>
+
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Foreshadowing Template</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="foreshadowing_template" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="foreshadowing_template"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Timeline Deviation Instruction</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="timeline_deviation_instruction" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="timeline_deviation_instruction"></textarea>
+                            </div>
+
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Auto-Resolve Deviation Instruction</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="auto_resolve_deviation_instruction" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="auto_resolve_deviation_instruction"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="aspect-destinia-grid two">
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Guidance Outro</label>
+                                </div>
+                                <textarea id="guidance_outro"></textarea>
+                            </div>
+
+                            <div class="aspect-destinia-field">
+                                <div class="aspect-destinia-label-row">
+                                    <label class="aspect-destinia-label">Evaluator Prompt</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="evaluator_prompt" hidden title="">⚠️</span>
+                                </div>
+                                <textarea id="evaluator_prompt" class="aspect-destinia-code tall"></textarea>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Guidance Injection Settings</div>
+                        <div class="aspect-destinia-field">
+                            <label class="aspect-destinia-label">Guidance Placement</label>
+                            <div class="radio_group">
+                                <label><input type="radio" name="guidance_position" value="2" /><span>Before Main Prompt</span></label>
+                                <label><input type="radio" name="guidance_position" value="0" /><span>After Main Prompt</span></label>
+                                <label class="flex-container alignItemsCenter"><input type="radio" name="guidance_position" value="1" /><span>In Chat at Depth</span><input id="guidance_depth" class="text_pole inline_setting" type="number" min="0" max="99" /><span>as</span><select id="guidance_role" class="text_pole inline_setting"><option value="0">System</option><option value="1">User</option><option value="2">Assistant</option></select></label>
+                            </div>
+                            <label class="checkbox_label"><input id="guidance_scan" type="checkbox" /><span>Include in World Info Scanning</span></label>
+                        </div>
+                        <div class="aspect-destinia-actions">
+                            <button id="fresh_reset_extension" class="menu_button menu_button_danger">Fresh Reset Extension</button>
+                            <button id="download_debug_log" class="menu_button">Download Debug Log</button>
+                        </div>
+                        <div class="aspect-destinia-footer-superscript" aria-label="Aspect of Destiny footer">
+                            <div class="aspect-destinia-footer-meta">
+                                <span>version 0.2.1</span>
+                                <span>Genisai</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="aspect-destinia-card">
+                        <div class="aspect-destinia-section-title">Misc.</div>
+                        <label class="checkbox_label"><input id="display_memories" type="checkbox" /><span>Display Message State</span></label>
+                        <label class="checkbox_label"><input id="auto_summarize_on_send" type="checkbox" /><span>Refresh Guidance Before Generation</span></label>
+                        <label class="checkbox_label"><input id="default_chat_enabled" type="checkbox" /><span>Enable Guidance in New Chats</span></label>
+                        <label class="checkbox_label"><input id="use_global_toggle_state" type="checkbox" /><span>Use Global Toggle State</span></label>
+                        <label class="checkbox_label"><input id="notify_on_profile_switch" type="checkbox" /><span>Notify on Switch</span></label>
+                        <label class="checkbox_label"><input id="debug_mode" type="checkbox" /><span>Debug Mode</span></label>
+                        <div class="aspect-destinia-actions">
+                            <button id="refresh_guidance" class="menu_button">Refresh Guidance</button>
+                            <button id="revert_settings" class="menu_button">Revert Settings</button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
