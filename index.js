@@ -1132,10 +1132,20 @@ function addInfoTipsToSettings() {
         appendInfoTip(label, helpKey, `Explain ${label?.textContent?.trim() || fieldId}`);
     }
 
+    const guidanceSettingsTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Guidance Injection Settings');
+    appendInfoTip(guidanceSettingsTitle, 'guidance_placement', 'Explain Guidance Injection Settings');
     const guidancePlacementLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Guidance Placement');
     appendInfoTip(guidancePlacementLabel, 'guidance_placement', 'Explain Guidance Placement');
+    const guidancePlacementOptions = Array.from(root.querySelectorAll('input[name="guidance_position"]')).map((input) => input.parentElement).filter(Boolean);
+    appendInfoTip(guidancePlacementOptions.find((element) => element.textContent.includes('Before Main Prompt')), 'guidance_placement', 'Explain Before Main Prompt');
+    appendInfoTip(guidancePlacementOptions.find((element) => element.textContent.includes('After Main Prompt')), 'guidance_placement', 'Explain After Main Prompt');
+    appendInfoTip(guidancePlacementOptions.find((element) => element.textContent.includes('In Chat at Depth')), 'guidance_placement', 'Explain In Chat at Depth');
     const guidanceScanLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Include in World Info Scanning');
     appendInfoTip(guidanceScanLabel, 'include_in_world_info_scanning', 'Explain Include in World Info Scanning');
+    const miscTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Misc.');
+    appendInfoTip(miscTitle, 'debug_mode', 'Explain Miscellaneous Settings');
+    const statusTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Status');
+    appendInfoTip(statusTitle, 'display_message_state', 'Explain Status');
     const displayMemoriesLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Display Message State');
     appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Display Message State');
     const autoSummarizeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Refresh Guidance Before Generation');
@@ -1148,15 +1158,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(notifyOnSwitchLabel, 'notify_on_switch', 'Explain Notify on Switch');
     const debugModeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Debug Mode');
     appendInfoTip(debugModeLabel, 'debug_mode', 'Explain Debug Mode');
-
-    const freshResetButton = root.querySelector('#fresh_reset_extension');
-    if (freshResetButton && !freshResetButton.parentElement?.querySelector('.aspect-destinia-info-tooltip[data-tooltip-key="fresh_reset_extension"]')) {
-        freshResetButton.insertAdjacentHTML('afterend', renderInfoTip('fresh_reset_extension', 'Explain Fresh Reset Extension'));
-    }
-    const debugLogButton = root.querySelector('#download_debug_log');
-    if (debugLogButton && !debugLogButton.parentElement?.querySelector('.aspect-destinia-info-tooltip[data-tooltip-key="download_debug_log"]')) {
-        debugLogButton.insertAdjacentHTML('afterend', renderInfoTip('download_debug_log', 'Explain Download Debug Log'));
-    }
 }
 function setupInfoTooltips() {
     const root = document.getElementById(ROOT_ID);
