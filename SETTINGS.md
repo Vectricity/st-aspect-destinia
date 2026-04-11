@@ -344,6 +344,11 @@ Conventions used below:
       - `Plot Progression Evaluation`
       - reason text
       - `Current Objectives`
+    - Planning change: Remove the `Plot Progression Evaluation` reason text from the status surface
+    - Planning change: Reflect diagnostic objective reasons in the settings planning so each current objective can display an associated reason line
+    - Planned objective reason display shape:
+      - `☑/☐ Objective label`
+      - `Reason: objective-specific reason text`
     - No per-subfield tooltip mapping currently documented in live wiring
 
 ---
