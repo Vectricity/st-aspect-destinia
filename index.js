@@ -285,7 +285,7 @@ const default_settings = {
     transition_threshold: 0.72,
     objective_auto_advance_threshold: 0.8,
     objective_evaluation_method: 'integrated',
-    intent_window: 8,
+    intent_window: 2,
     evaluator_connection_profile: '',
     evaluator_preset: '',
     current_plot_index: 0,
@@ -2960,8 +2960,6 @@ function update_message_visuals(i, style=true, text=null) {
                 lines.push(`${done ? '☑' : '☐'} ${label}`);
                 lines.push(`• **Reason:** ${objectiveReason}`);
             });
-        } else if (reason) {
-            lines.push(`**Reason:** ${reason}`);
         }
         rendered = lines.join('\n');
     }
@@ -3210,9 +3208,7 @@ function initialize_settings_listeners() {
     }, false);
     bind_setting('#notify_on_profile_switch', 'notify_on_profile_switch', 'boolean')
 
-    bind_function('#revert_settings', reset_settings);
     bind_function('#toggle_chat_guidance', () => attach_current_chat_to_profile(), false);
-    bind_function('#refresh_guidance', () => refresh_guidance());
     bind_function('#clear_chat', clearCurrentChatMessages, false);
     bind_function('#fresh_reset_extension', freshResetExtensionState, false);
     bind_function('#download_debug_log', downloadDebugLog, false);
@@ -3224,11 +3220,6 @@ function initialize_settings_listeners() {
     bind_setting('#objective_auto_advance_threshold', 'objective_auto_advance_threshold', 'number');
     bind_setting('#objective_evaluation_method', 'objective_evaluation_method', 'text');
     bind_setting('#intent_window', 'intent_window', 'number');
-    bind_setting('#advancement_mode', 'advancement_mode', 'text', () => {
-        if (get_settings('advancement_mode') !== 'objectives') {
-            set_settings('advancement_mode', 'objectives');
-        }
-    });
     bind_setting('#auto_advance', 'auto_advance', 'boolean');
     bind_setting('#foreshadow_next_plot_point', 'foreshadow_next_plot_point', 'boolean');
     bind_setting('#respect_user_intent', 'respect_user_intent', 'boolean');

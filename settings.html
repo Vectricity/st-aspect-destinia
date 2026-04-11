@@ -45,7 +45,6 @@
                                 <button id="export_profile" class="menu_button">Export Profile</button>
                                 <button id="import_profile" class="menu_button">Import Profile</button>
                                 <input id="import_file" type="file" accept="application/json" class="aspect-destinia-hidden" />
-                                <button id="aspect_destinia_popout_button" class="menu_button aspect-destinia-icon-button" title="Move config to floating popout" aria-label="Move config to floating popout"><i class="fa-solid fa-window-restore" aria-hidden="true"></i></button>
                             </div>
                         </div>
                     </div>
@@ -63,7 +62,7 @@
                         </div>
                         <div class="aspect-destinia-field">
                             <label class="aspect-destinia-label">Recent Messages to Evaluate</label>
-                            <input id="intent_window" type="number" min="4" max="20" step="1" />
+                            <input id="intent_window" type="number" min="2" max="20" step="1" />
                         </div>
                         <div class="aspect-destinia-field">
                             <label class="aspect-destinia-label">Messages Evaluated</label>
@@ -149,12 +148,6 @@
                                 <label class="aspect-destinia-label">Plot Point Transition Threshold</label>
                                 <input id="transition_threshold" type="range" min="0.5" max="0.95" step="0.01" />
                                 <div class="aspect-destinia-slider-meta"><span id="transition_threshold_value" class="aspect-destinia-slider-value"></span></div>
-                            </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Progression Rules</label>
-                                <select id="advancement_mode">
-                                    <option value="objectives">Objective-based</option>
-                                </select>
                             </div>
                         </div>
 
@@ -338,16 +331,6 @@
                             </div>
                             <label class="checkbox_label"><input id="guidance_scan" type="checkbox" /><span>Include in World Info Scanning</span></label>
                         </div>
-                        <div class="aspect-destinia-actions">
-                            <button id="fresh_reset_extension" class="menu_button menu_button_danger">Fresh Reset Extension</button>
-                            <button id="download_debug_log" class="menu_button">Download Debug Log</button>
-                        </div>
-                        <div class="aspect-destinia-footer-superscript" aria-label="Aspect of Destiny footer">
-                            <div class="aspect-destinia-footer-meta">
-                                <span>version 0.2.1</span>
-                                <span>Genisai</span>
-                            </div>
-                        </div>
                     </div>
 
                     <div class="aspect-destinia-card">
@@ -359,8 +342,14 @@
                         <label class="checkbox_label"><input id="notify_on_profile_switch" type="checkbox" /><span>Notify on Switch</span></label>
                         <label class="checkbox_label"><input id="debug_mode" type="checkbox" /><span>Debug Mode</span></label>
                         <div class="aspect-destinia-actions">
-                            <button id="refresh_guidance" class="menu_button">Refresh Guidance</button>
-                            <button id="revert_settings" class="menu_button">Revert Settings</button>
+                            <button id="download_debug_log" class="menu_button">Download Debug Log</button>
+                            <button id="fresh_reset_extension" class="menu_button menu_button_danger">Reset Extension</button>
+                        </div>
+                        <div class="aspect-destinia-footer-superscript" aria-label="Aspect of Destiny footer">
+                            <div class="aspect-destinia-footer-meta">
+                                <span>version 0.2.1</span>
+                                <span>Genisai</span>
+                            </div>
                         </div>
                     </div>
 
