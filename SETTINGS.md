@@ -120,6 +120,7 @@ Conventions used below:
 24. `intent_window`
     - Type: numeric input
     - Input: number (`min=4`, `max=20`, `step=1`)
+    - Planning change: Change default from `8` to `2`
 
 ### Radio group
 25. `Messages Evaluated`
