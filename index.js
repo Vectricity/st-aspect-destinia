@@ -38,11 +38,66 @@ export { MODULE_NAME };
 // THe module name modifies where settings are stored, where information is stored on message objects, macros, etc.
 const MODULE_NAME = 'aspect_destinia';
 const MODULE_NAME_FANCY = 'Aspect: Destinia';
+const ROOT_ID = 'aspect_destinia_root';
 // CSS classes
 const css_message_div = `aspect_destinia_display`
 const state_div_class = `aspect_destinia_text`
 const settings_div_id = `aspect_destinia_settings`
 const settings_content_class = `aspect_destinia_settings_content`
+
+const LABEL_HELP = Object.freeze({
+    extension_enabled: 'Turns Destinia guidance generation on or off for the selected profile.',
+    profile: 'The currently loaded configuration profile.',
+    current_chat: 'The known-chat attachment target for the selected profile.',
+    evaluator_connection_profile: 'Which connection profile the separate evaluator request uses.',
+    evaluator_chat_completion_preset: 'Which completion preset the separate evaluator request uses.',
+    recent_messages_to_evaluate: 'How many recent chat messages are included in evaluator evidence.',
+    messages_evaluated: 'Which message types are included in evaluator evidence (`User`, `Assistant`, or `Both`).',
+    timeline: 'The editable JSON source of truth for live story structure, plot points, objectives, and transitions.',
+    timeline_preset: 'A saved timeline snapshot that can be selected, overwritten, duplicated, imported, or exported.',
+    reset: 'Restore a field to its in-code default value.',
+    repair: 'Rebuild Timeline JSON into the current live schema by removing invalid/outdated structure and adding missing required structure.',
+    reset_objectives: 'Set all objective `completed` booleans in the visible Timeline JSON to `false`.',
+    timeline_deviation: 'Allows the story to move off-script from the planned timeline.',
+    timeline_deviation_auto_resolve: 'Attempts to guide the story back toward the timeline after deviation.',
+    detach: 'Allows plot progression to continue apart from the user\'s active scene.',
+    detach_instruction: 'Guidance text explaining how detached progression should behave.',
+    objective_auto_advance: 'Allows progression to move automatically when readiness conditions are met.',
+    objective_auto_advance_threshold: 'The completion ratio required before auto-advance can trigger in objective-based progression.',
+    objective_evaluation_method: 'Chooses whether objective completion comes from the integrated evaluator response or per-objective checks.',
+    plot_point_transition_threshold: 'Confidence threshold used when judging progression readiness.',
+    plot_progression_rules: 'Currently objective-based progression only.',
+    plot_alignment_strictness: 'How tightly guidance should adhere to the current plot point.',
+    plot_progression_aggressiveness: 'How strongly guidance should push toward progression when allowed.',
+    plot_foreshadowing: 'Whether guidance may seed the next plot point before full progression.',
+    plot_stagnation: 'Whether clear conversational support for remaining on the current plot point should be honored.',
+    injected_guidance_fields: 'Editable text templates and instructions used to build the injected guidance and evaluator behavior.',
+    injection_intro: 'Editable text template used as the opening instruction block for injected Destinia guidance.',
+    guidance_principles: 'Editable principles that define how Destinia should balance plot guidance, immersion, and user agency.',
+    current_plot_point_template: 'Template used to inject the active plot point\'s identifying details, summary, steering, and pace.',
+    next_plot_point_template: 'Template used to inject the upcoming plot point information when foreshadowing or transition context is allowed.',
+    transition_template: 'Template used to describe the transition requirements between the current and next plot point.',
+    objective_mode_template: 'Template used when objective-based progression rules are active for the current plot point.',
+    stagnation_instruction: 'Instruction appended when evaluation indicates the story should remain on the current plot point.',
+    progression_instruction: 'Instruction appended when evaluation indicates the story may move toward the next plot point.',
+    pacing_instruction: 'Template describing how strictness and pacing-bias settings should affect guidance behavior.',
+    objective_completion_guidance: 'Evaluator guidance explaining how to judge objective completion from recent chat evidence.',
+    foreshadowing_template: 'Template used when the next plot point may be lightly seeded before full progression.',
+    timeline_deviation_instruction: 'Instruction used when deviation from the planned timeline is allowed.',
+    auto_resolve_deviation_instruction: 'Instruction used when deviation is allowed and Destinia should gradually guide the story back on track.',
+    guidance_outro: 'Editable closing instruction appended to the main injected guidance block.',
+    evaluator_prompt: 'The evaluator prompt template that judges progression, stagnation, confidence, and objective completion.',
+    guidance_placement: 'Controls where the main live Destinia guidance prompt is inserted into prompt assembly for generation. This is the active timeline-guidance injection that tells the LLM what the current plot point, objectives, and guidance instructions are.',
+    include_in_world_info_scanning: 'Whether the injected prompt should participate in world-info scanning when SillyTavern builds context.',
+    fresh_reset_extension: 'Reset current-chat Destinia state for fresh testing without deleting profiles or presets.',
+    download_debug_log: 'Export the in-memory debug trace collected while `Debug Mode` is enabled.',
+    display_message_state: 'Show per-message diagnostic/state surfaces in chat.',
+    refresh_guidance_before_generation: 'Whether Destinia should explicitly rebuild and re-register its guidance on the pre-generation event, so the latest current plot state and settings are injected right before the LLM generates a response.',
+    enable_guidance_in_new_chats: 'Default enabled state for new chats.',
+    use_global_toggle_state: 'Use one shared enabled/disabled toggle state instead of per-chat state.',
+    notify_on_switch: 'Show a toast when profiles switch.',
+    debug_mode: 'Enable console logging plus in-memory trace collection for exported debug logs.'
+});
 
 // Destinia foundation constants
 const DEFAULT_TIMELINE_TEMPLATE = {
@@ -989,8 +1044,300 @@ function repairTimelineJson() {
         toast('Timeline JSON was invalid and has been replaced with a repaired default template.', 'warning');
     }
 }
+function renderInfoTip(key, label = 'More information') {
+    const helpText = LABEL_HELP[key];
+    if (!helpText) return '';
+
+    return `<span class="aspect-destinia-info-tooltip" data-tooltip-key="${clean_string_for_html(key)}"><button
+                type="button"
+                class="aspect-destinia-info-trigger"
+                aria-label="${clean_string_for_html(label)}"
+                aria-expanded="false"
+            ><span class="aspect-destinia-info-trigger-text" aria-hidden="true">i</span></button><span class="aspect-destinia-info-bubble" role="tooltip">${clean_string_for_html(helpText)}</span></span>`;
+}
+function appendInfoTip(target, key, label) {
+    if (!target || !LABEL_HELP[key]) return;
+    if (target.parentElement?.querySelector(`.aspect-destinia-info-tooltip[data-tooltip-key="${key}"]`)) return;
+    target.insertAdjacentHTML('beforeend', renderInfoTip(key, label));
+}
+function addInfoTipsToSettings() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return;
+
+    appendInfoTip(root.querySelector('label[for="dest_enabled"].aspect-destinia-checkbox-label-text'), 'extension_enabled', 'Explain Extension Enabled');
+    const profileLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Profile');
+    appendInfoTip(profileLabel, 'profile', 'Explain Profile');
+    const currentChatLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Current Chat');
+    appendInfoTip(currentChatLabel, 'current_chat', 'Explain Current Chat');
+    const evaluatorConnectionLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Evaluator Connection Profile');
+    appendInfoTip(evaluatorConnectionLabel, 'evaluator_connection_profile', 'Explain Evaluator Connection Profile');
+    const evaluatorPresetLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Evaluator Chat Completion Preset');
+    appendInfoTip(evaluatorPresetLabel, 'evaluator_chat_completion_preset', 'Explain Evaluator Chat Completion Preset');
+    const recentMessagesLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Recent Messages to Evaluate');
+    appendInfoTip(recentMessagesLabel, 'recent_messages_to_evaluate', 'Explain Recent Messages to Evaluate');
+    const messagesEvaluatedLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Messages Evaluated');
+    appendInfoTip(messagesEvaluatedLabel, 'messages_evaluated', 'Explain Messages Evaluated');
+    const timelineTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Timeline');
+    appendInfoTip(timelineTitle, 'timeline', 'Explain Timeline');
+    const timelinePresetLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Timeline Preset');
+    appendInfoTip(timelinePresetLabel, 'timeline_preset', 'Explain Timeline Preset');
+    const timelineDeviationLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Timeline Deviation');
+    appendInfoTip(timelineDeviationLabel, 'timeline_deviation', 'Explain Timeline Deviation');
+    const autoResolveDeviationLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Timeline Deviation Auto-Resolve');
+    appendInfoTip(autoResolveDeviationLabel, 'timeline_deviation_auto_resolve', 'Explain Timeline Deviation Auto-Resolve');
+    const detachLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Detach');
+    appendInfoTip(detachLabel, 'detach', 'Explain Detach');
+    const detachInstructionLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Detach Instruction');
+    appendInfoTip(detachInstructionLabel, 'detach_instruction', 'Explain Detach Instruction');
+    const autoAdvanceLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Auto-Advance');
+    appendInfoTip(autoAdvanceLabel, 'objective_auto_advance', 'Explain Objective Auto-Advance');
+    const autoAdvanceThresholdLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Auto-Advance Threshold');
+    appendInfoTip(autoAdvanceThresholdLabel, 'objective_auto_advance_threshold', 'Explain Objective Auto-Advance Threshold');
+    const objectiveEvaluationMethodLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Evaluation Method');
+    appendInfoTip(objectiveEvaluationMethodLabel, 'objective_evaluation_method', 'Explain Objective Evaluation Method');
+    const transitionThresholdLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Point Transition Threshold');
+    appendInfoTip(transitionThresholdLabel, 'plot_point_transition_threshold', 'Explain Plot Point Transition Threshold');
+    const advancementModeLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Rules');
+    appendInfoTip(advancementModeLabel, 'plot_progression_rules', 'Explain Plot Progression Rules');
+    const strictnessLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Alignment Strictness');
+    appendInfoTip(strictnessLabel, 'plot_alignment_strictness', 'Explain Plot Alignment Strictness');
+    const pacingBiasLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Aggressiveness');
+    appendInfoTip(pacingBiasLabel, 'plot_progression_aggressiveness', 'Explain Plot Progression Aggressiveness');
+    const foreshadowingLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Foreshadowing');
+    appendInfoTip(foreshadowingLabel, 'plot_foreshadowing', 'Explain Plot Foreshadowing');
+    const stagnationLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Stagnation');
+    appendInfoTip(stagnationLabel, 'plot_stagnation', 'Explain Plot Stagnation');
+    const guidanceFieldsTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Injected Guidance Fields');
+    appendInfoTip(guidanceFieldsTitle, 'injected_guidance_fields', 'Explain Injected Guidance Fields');
+
+    const fieldTooltipMap = {
+        guidance_intro: 'injection_intro',
+        guidance_principles: 'guidance_principles',
+        current_plot_point_template: 'current_plot_point_template',
+        next_plot_point_template: 'next_plot_point_template',
+        transition_template: 'transition_template',
+        objective_mode_template: 'objective_mode_template',
+        stagnation_instruction: 'stagnation_instruction',
+        progression_instruction: 'progression_instruction',
+        pacing_instruction: 'pacing_instruction',
+        objective_completion_guidance: 'objective_completion_guidance',
+        foreshadowing_template: 'foreshadowing_template',
+        timeline_deviation_instruction: 'timeline_deviation_instruction',
+        auto_resolve_deviation_instruction: 'auto_resolve_deviation_instruction',
+        guidance_outro: 'guidance_outro',
+        evaluator_prompt: 'evaluator_prompt',
+    };
+    for (const [fieldId, helpKey] of Object.entries(fieldTooltipMap)) {
+        const label = root.querySelector(`[for="${fieldId}"].aspect-destinia-label`) || root.querySelector(`#${fieldId}`)?.parentElement?.querySelector('.aspect-destinia-label');
+        appendInfoTip(label, helpKey, `Explain ${label?.textContent?.trim() || fieldId}`);
+    }
+
+    const guidancePlacementLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Guidance Placement');
+    appendInfoTip(guidancePlacementLabel, 'guidance_placement', 'Explain Guidance Placement');
+    const guidanceScanLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Include in World Info Scanning');
+    appendInfoTip(guidanceScanLabel, 'include_in_world_info_scanning', 'Explain Include in World Info Scanning');
+    const displayMemoriesLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Display Message State');
+    appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Display Message State');
+    const autoSummarizeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Refresh Guidance Before Generation');
+    appendInfoTip(autoSummarizeLabel, 'refresh_guidance_before_generation', 'Explain Refresh Guidance Before Generation');
+    const defaultChatEnabledLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Enable Guidance in New Chats');
+    appendInfoTip(defaultChatEnabledLabel, 'enable_guidance_in_new_chats', 'Explain Enable Guidance in New Chats');
+    const globalToggleLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Use Global Toggle State');
+    appendInfoTip(globalToggleLabel, 'use_global_toggle_state', 'Explain Use Global Toggle State');
+    const notifyOnSwitchLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Notify on Switch');
+    appendInfoTip(notifyOnSwitchLabel, 'notify_on_switch', 'Explain Notify on Switch');
+    const debugModeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Debug Mode');
+    appendInfoTip(debugModeLabel, 'debug_mode', 'Explain Debug Mode');
+
+    const freshResetButton = root.querySelector('#fresh_reset_extension');
+    if (freshResetButton && !freshResetButton.parentElement?.querySelector('.aspect-destinia-info-tooltip[data-tooltip-key="fresh_reset_extension"]')) {
+        freshResetButton.insertAdjacentHTML('afterend', renderInfoTip('fresh_reset_extension', 'Explain Fresh Reset Extension'));
+    }
+    const debugLogButton = root.querySelector('#download_debug_log');
+    if (debugLogButton && !debugLogButton.parentElement?.querySelector('.aspect-destinia-info-tooltip[data-tooltip-key="download_debug_log"]')) {
+        debugLogButton.insertAdjacentHTML('afterend', renderInfoTip('download_debug_log', 'Explain Download Debug Log'));
+    }
+}
+function setupInfoTooltips() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root || root.dataset.infoTooltipsBound === 'true') return;
+
+    const viewportPadding = 12;
+    const tooltipLayerId = `${ROOT_ID}_tooltip_layer`;
+    let tooltipLayer = document.getElementById(tooltipLayerId);
+    if (!tooltipLayer) {
+        tooltipLayer = document.createElement('div');
+        tooltipLayer.id = tooltipLayerId;
+        tooltipLayer.className = 'aspect-destinia-tooltip-layer';
+        document.body.appendChild(tooltipLayer);
+    }
+
+    root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip, index) => {
+        const bubble = tooltip.querySelector('.aspect-destinia-info-bubble');
+        if (!bubble) return;
+        const bubbleId = bubble.id || `${ROOT_ID}_tooltip_${index + 1}`;
+        bubble.id = bubbleId;
+        tooltip.dataset.tooltipBubbleId = bubbleId;
+        if (bubble.parentElement !== tooltipLayer) {
+            tooltipLayer.appendChild(bubble);
+        }
+    });
+
+    const getTooltipParts = (tooltip) => {
+        if (!tooltip) return { trigger: null, bubble: null };
+        const trigger = tooltip.querySelector('.aspect-destinia-info-trigger');
+        const bubbleId = tooltip.dataset.tooltipBubbleId || '';
+        const bubble = bubbleId ? document.getElementById(bubbleId) : null;
+        return { trigger, bubble };
+    };
+
+    const clearTooltipPosition = (bubble) => {
+        if (!bubble) return;
+        bubble.classList.remove('is-active', 'is-measuring', 'is-positioned');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-left');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-top');
+    };
+
+    const updateTooltipPosition = (tooltip) => {
+        if (!tooltip) return;
+        const { trigger, bubble } = getTooltipParts(tooltip);
+        if (!trigger || !bubble) return;
+
+        bubble.classList.remove('is-positioned');
+        bubble.classList.add('is-measuring');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-left');
+        bubble.style.removeProperty('--aspect-destinia-tooltip-top');
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const bubbleRect = bubble.getBoundingClientRect();
+        const maxLeft = Math.max(viewportPadding, window.innerWidth - viewportPadding - bubbleRect.width);
+        const desiredLeft = triggerRect.right - bubbleRect.width;
+        const left = Math.min(Math.max(viewportPadding, desiredLeft), maxLeft);
+        const top = Math.min(
+            triggerRect.bottom + 8,
+            Math.max(viewportPadding, window.innerHeight - viewportPadding - bubbleRect.height)
+        );
+
+        bubble.style.setProperty('--aspect-destinia-tooltip-left', `${Math.round(left)}px`);
+        bubble.style.setProperty('--aspect-destinia-tooltip-top', `${Math.round(top)}px`);
+        bubble.classList.remove('is-measuring');
+        bubble.classList.add('is-positioned');
+    };
+
+    const hideTooltip = (tooltip) => {
+        if (!tooltip) return;
+        tooltip.classList.remove('is-open');
+        const { trigger, bubble } = getTooltipParts(tooltip);
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+        clearTooltipPosition(bubble);
+    };
+
+    const showTooltip = (tooltip, { pinned = false } = {}) => {
+        if (!tooltip) return;
+        const { trigger, bubble } = getTooltipParts(tooltip);
+        if (!trigger || !bubble) return;
+
+        bubble.classList.add('is-active');
+        tooltip.classList.toggle('is-open', pinned);
+        trigger.setAttribute('aria-expanded', pinned ? 'true' : 'false');
+        updateTooltipPosition(tooltip);
+    };
+
+    const closeOpenTooltips = (except = null) => {
+        root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip) => {
+            if (tooltip === except) return;
+            hideTooltip(tooltip);
+        });
+    };
+
+    root.addEventListener('pointerdown', (event) => {
+        const trigger = event.target.closest('.aspect-destinia-info-trigger');
+        if (!trigger) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+
+    root.addEventListener('mouseenter', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+        closeOpenTooltips(tooltip);
+        showTooltip(tooltip);
+    }, true);
+
+    root.addEventListener('mouseleave', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
+        hideTooltip(tooltip);
+    }, true);
+
+    root.addEventListener('focusin', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+        closeOpenTooltips(tooltip);
+        showTooltip(tooltip);
+    });
+
+    root.addEventListener('focusout', (event) => {
+        const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
+        const nextTarget = event.relatedTarget;
+        if (nextTarget && tooltip.contains(nextTarget)) return;
+        hideTooltip(tooltip);
+    });
+
+    root.addEventListener('click', (event) => {
+        const trigger = event.target.closest('.aspect-destinia-info-trigger');
+        if (!trigger) return;
+
+        const tooltip = trigger.closest('.aspect-destinia-info-tooltip');
+        if (!tooltip) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        trigger.focus({ preventScroll: true });
+
+        const willOpen = !tooltip.classList.contains('is-open');
+        closeOpenTooltips(tooltip);
+        if (!willOpen) {
+            hideTooltip(tooltip);
+            return;
+        }
+        showTooltip(tooltip, { pinned: true });
+    });
+
+    root.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeOpenTooltips();
+    });
+
+    document.addEventListener('pointerdown', (event) => {
+        if (event.target.closest(`#${ROOT_ID} .aspect-destinia-info-tooltip`)) return;
+        closeOpenTooltips();
+    }, true);
+
+    const refreshOpenTooltips = () => {
+        root.querySelectorAll('.aspect-destinia-info-tooltip').forEach((tooltip) => {
+            const { bubble } = getTooltipParts(tooltip);
+            if (bubble?.classList.contains('is-active')) {
+                updateTooltipPosition(tooltip);
+            }
+        });
+    };
+
+    const closeTooltipsOnScroll = () => {
+        closeOpenTooltips();
+    };
+
+    window.addEventListener('resize', refreshOpenTooltips);
+    window.addEventListener('scroll', closeTooltipsOnScroll, true);
+
+    root.dataset.infoTooltipsBound = 'true';
+}
 function addFieldResetButtons() {
-    const root = document.getElementById('aspect_destinia_root');
+    const root = document.getElementById(ROOT_ID);
     if (!root) return;
 
     for (const fieldId of Object.keys(FIELD_DEFAULTS)) {
@@ -1028,6 +1375,7 @@ function addFieldResetButtons() {
                 repairTimelineButton.className = 'menu_button aspect-destinia-field-reset aspect-destinia-repair-timeline';
                 repairTimelineButton.type = 'button';
                 repairTimelineButton.textContent = 'Repair';
+                repairTimelineButton.title = LABEL_HELP.repair;
                 repairTimelineButton.addEventListener('click', repairTimelineJson);
                 actionRow.appendChild(repairTimelineButton);
             }
@@ -1036,9 +1384,13 @@ function addFieldResetButtons() {
                 resetObjectivesButton.className = 'menu_button aspect-destinia-field-reset aspect-destinia-reset-objectives';
                 resetObjectivesButton.type = 'button';
                 resetObjectivesButton.textContent = 'Reset Objectives';
+                resetObjectivesButton.title = LABEL_HELP.reset_objectives;
                 resetObjectivesButton.addEventListener('click', resetTimelineObjectives);
                 actionRow.appendChild(resetObjectivesButton);
             }
+            button.title = LABEL_HELP.reset;
+        } else {
+            button.title = LABEL_HELP.reset;
         }
     }
 }
@@ -2103,6 +2455,8 @@ function refresh_settings() {
     render_status_panel();
     update_slider_displays();
     addFieldResetButtons();
+    addInfoTipsToSettings();
+    setupInfoTooltips();
     updateFieldValidationIndicators();
 
     // enable or disable settings based on others
