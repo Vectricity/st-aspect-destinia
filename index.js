@@ -1227,6 +1227,12 @@ function setupInfoTooltips() {
     const hideTooltip = (tooltip) => {
         if (!tooltip) return;
         tooltip.classList.remove('is-open');
+        tooltip.dataset.justClosed = 'true';
+        setTimeout(() => {
+            if (tooltip.dataset.justClosed === 'true') {
+                delete tooltip.dataset.justClosed;
+            }
+        }, 0);
         const { trigger, bubble } = getTooltipParts(tooltip);
         if (trigger) {
             trigger.setAttribute('aria-expanded', 'false');
@@ -1235,7 +1241,7 @@ function setupInfoTooltips() {
     };
 
     const showTooltip = (tooltip, { pinned = false } = {}) => {
-        if (!tooltip) return;
+        if (!tooltip || tooltip.dataset.justClosed === 'true') return;
         const { trigger, bubble } = getTooltipParts(tooltip);
         if (!trigger || !bubble) return;
 
