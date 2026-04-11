@@ -603,9 +603,27 @@ Conventions used below:
 163. `Refresh Guidance`
     - Type: button
     - No tooltip
+    - Planning note: Appears potentially redundant for the live UI because guidance refresh is expected to happen automatically.
 164. `Revert Settings`
     - Type: button
     - No tooltip
+    - Planning change: Remove this control
+165. `Download Debug Log`
+    - Type: button
+    - No tooltip bubble
+    - Planning change: Move to just above `Reset Extension` at the end of `Misc.`
+166. `Reset Extension`
+    - Type: button
+    - Planning rename: Rename from `Fresh Reset Extension` to `Reset Extension`
+    - Planning change: Move to the end of `Misc.` below `Download Debug Log`
+167. `version 0.2.1`
+    - Type: footer text
+    - No tooltip
+    - Planning change: Move to the very end of `Misc.`
+168. `Genisai`
+    - Type: footer text
+    - No tooltip
+    - Planning change: Move to the very end of `Misc.`
 
 ---
 
