@@ -274,10 +274,12 @@ Conventions used below:
 66. `Plot Progression Rules`
     - Type: label
     - Tooltip: Currently objective-based progression only.
+    - Planning change: Hide this setting
 67. `advancement_mode`
     - Type: select input
     - Input option:
       - `Objective-based`
+    - Planning change: Hide this setting
 
 ### Plot control row
 68. `First Plot Point`
