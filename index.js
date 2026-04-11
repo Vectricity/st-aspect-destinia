@@ -3454,12 +3454,6 @@ function initialize_popout() {
     loadMovingUIState();
     dragElement($popout);
 
-    // set up the popout button in the settings to toggle it
-    bind_function('#aspect_destinia_popout_button', (e) => {
-        toggle_popout();
-        e.stopPropagation();
-    })
-
     // when escape is pressed, toggle the popout.
     // This has to be here because ST removes .draggable items when escape is pressed, destroying the popout.
     $(document).on('keydown', async function (event) {
