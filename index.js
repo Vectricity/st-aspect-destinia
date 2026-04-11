@@ -1261,7 +1261,7 @@ function setupInfoTooltips() {
 
     root.addEventListener('mouseenter', (event) => {
         const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
-        if (!tooltip) return;
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
         closeOpenTooltips(tooltip);
         showTooltip(tooltip);
     }, true);
@@ -1274,7 +1274,7 @@ function setupInfoTooltips() {
 
     root.addEventListener('focusin', (event) => {
         const tooltip = event.target.closest('.aspect-destinia-info-tooltip');
-        if (!tooltip) return;
+        if (!tooltip || tooltip.classList.contains('is-open')) return;
         closeOpenTooltips(tooltip);
         showTooltip(tooltip);
     });
