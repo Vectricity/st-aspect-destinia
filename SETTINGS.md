@@ -93,6 +93,7 @@ Conventions used below:
     - Type: button
     - No tooltip bubble
     - Native title: `Move config to floating popout`
+    - Planning status: Marked for removal (not desired)
 
 ---
 
