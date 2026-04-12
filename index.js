@@ -2908,14 +2908,14 @@ function update_message_visuals(i, style=true, text=null) {
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                lines.push(`<span class="aspect-destinia-diagnostic-objective-icon-svg ${done ? 'is-checked' : 'is-unchecked'}" aria-hidden="true"></span> ${label}`);
+                lines.push(`**${done ? '☑' : '☐'}** ${label}`);
                 lines.push(`• **Reason:** ${objectiveReason}`);
             });
         }
         rendered = lines.join('\n');
     }
 
-    rendered = messageFormatting(rendered, null, false, false, -1);
+    rendered = messageFormatting(clean_string_for_html(rendered), null, false, false, -1);
     const state_div = $(buildDiagnosticDrawerShell(rendered, isLoadingDiagnostic));
     const drawer = state_div.find('.aspect-destinia-diagnostic-drawer');
     if (isLoadingDiagnostic) {
