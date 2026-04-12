@@ -65,7 +65,6 @@ const LABEL_HELP = Object.freeze({
     progression_rule: 'Selects what can trigger plot progression: clear user intent, objective completion threshold, either one, or both together.',
     objective_auto_advance_threshold: 'The completion ratio required before objective completion can trigger plot progression.',
     objective_evaluation_method: 'Chooses whether objective completion comes from the integrated evaluator response or per-objective checks.',
-    plot_progression_rules: 'Currently objective-based progression only.',
     plot_alignment_strictness: 'How tightly guidance should adhere to the current plot point.',
     plot_progression_aggressiveness: 'How strongly guidance should push toward progression when allowed.',
     plot_foreshadowing: 'Whether guidance may seed the next plot point before full progression.',
@@ -1103,8 +1102,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(autoAdvanceThresholdLabel, 'objective_auto_advance_threshold', 'Explain Objective Completion Trigger Threshold');
     const objectiveEvaluationMethodLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Evaluation Method');
     appendInfoTip(objectiveEvaluationMethodLabel, 'objective_evaluation_method', 'Explain Objective Evaluation Method');
-    const advancementModeLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Rules');
-    appendInfoTip(advancementModeLabel, 'plot_progression_rules', 'Explain Plot Progression Rules');
     const strictnessLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Alignment Strictness');
     appendInfoTip(strictnessLabel, 'plot_alignment_strictness', 'Explain Plot Alignment Strictness');
     const pacingBiasLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Aggressiveness');
