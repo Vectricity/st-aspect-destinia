@@ -809,12 +809,14 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             objective_reasons: objectiveResults.map((result) => String(result?.reason || '')),
             did_advance: false,
         };
-        if (decision === 'advance' && get_settings('auto_advance') && !get_settings('allow_plot_stagnation')) {
+        if (decision === 'advance') {
             const completedCount = objectiveCompletion.filter(Boolean).length;
             const objectiveRatio = currentObjectives.length ? completedCount / currentObjectives.length : 0;
             const objectiveThreshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
             const advancementReady = objectiveRatio >= objectiveThreshold;
-            if (advancementReady && currentIndex < points.length - 1) {
+            const autoAdvanceAllowed = get_settings('auto_advance') && !get_settings('allow_plot_stagnation');
+            const userDrivenAdvanceAllowed = get_settings('allow_plot_stagnation');
+            if ((autoAdvanceAllowed || userDrivenAdvanceAllowed) && advancementReady && currentIndex < points.length - 1) {
                 set_settings('current_plot_index', currentIndex + 1);
                 diagnostic.did_advance = true;
             }
