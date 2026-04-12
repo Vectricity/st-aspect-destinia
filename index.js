@@ -762,38 +762,8 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
 
     return results;
 }
-let lastEvaluationKey = '';
-async function waitForEvaluationReady() {
-    try {
-        await waitUntilCondition(() => !streamingProcessor || streamingProcessor.isFinished, 15000, 100);
-    } catch {
-        debug('Evaluation readiness wait timed out while waiting for streaming to finish');
-        return false;
-    }
-    return true;
-}
-function buildEvaluationKey(targetMessage = null) {
-    const context = getContext();
-    const recentChat = (context.chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
-    const evidenceText = recentChat.map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`).join('\n');
-    return JSON.stringify({
-        mode: getMessagesEvaluatedMode(),
-        progressionRule: get_settings('progression_rule'),
-        objectiveThreshold: get_settings('objective_auto_advance_threshold'),
-        objectiveMethod: get_settings('objective_evaluation_method'),
-        timelineHash: getStringHash(get_settings('timeline_text') || ''),
-        targetMessageId: targetMessage ? context.chat.indexOf(targetMessage) : -1,
-        evidenceHash: getStringHash(evidenceText),
-    });
-}
 async function evaluateDestiniaProgress(targetMessage = null) {
     if (!chat_enabled() || !get_settings('dest_enabled')) return null;
-    if (!(await waitForEvaluationReady())) return null;
-    const evaluationKey = buildEvaluationKey(targetMessage);
-    if (evaluationKey === lastEvaluationKey) {
-        debug('Skipping duplicate Destinia evaluation for unchanged evidence');
-        return null;
-    }
     const prompt = buildDestiniaEvaluatorPrompt();
     if (!prompt) return null;
     const evaluatorPreset = get_settings('evaluator_preset');
@@ -872,7 +842,6 @@ async function evaluateDestiniaProgress(targetMessage = null) {
                 objectiveCompletion,
             });
         }
-        lastEvaluationKey = evaluationKey;
         render_status_panel();
         return parsed;
     } catch (error) {
