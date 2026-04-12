@@ -818,13 +818,15 @@ We need the specificity to override some theme styles.
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg {
     display: inline-block;
-    width: 1rem;
-    height: 1rem;
+    width: 1.15rem;
+    height: 1.15rem;
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
     vertical-align: text-bottom;
-    flex: 0 0 1rem;
+    flex: 0 0 1.15rem;
+    color: var(--SmartThemeBodyColor);
+    filter: drop-shadow(0 0 0.15px currentColor);
 }
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg.is-checked {
