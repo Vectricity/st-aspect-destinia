@@ -17,7 +17,7 @@
 }
 
 /* disabled buttons aren't properly styled by default */
-.settings_input:disabled, #aspect_destinia_state_interface *:disabled {
+.settings_input:disabled {
     cursor: not-allowed;
     opacity: 0.5;
     pointer-events: none;
@@ -139,16 +139,6 @@ We need the specificity to override some theme styles.
     backdrop-filter: blur(5px);
 }
 
-/* the progress bar when placed in the legacy state-edit interface */
-#aspect_destinia_state_interface #progress_bar .aspect_destinia_progress_bar {
-    width: 100%;
-    position: absolute;
-    bottom: 0;
-}
-#aspect_destinia_state_interface #progress_bar {
-    position: relative;
-}
-
 /* in the group member selection, the buttons that toggle summarization */
 .aspect_destinia_group_member_enable {
     transition: all 0.2s ease-in-out;
@@ -163,89 +153,6 @@ We need the specificity to override some theme styles.
 .aspect_destinia_group_member_enable:hover {
     opacity: inherit;
     filter: drop-shadow(0px 0px 5px rgb(65, 210, 243));
-}
-
-/* this is used in some interfaces just for some card styling */
-/* Memory state interface */
-dialog:has(#aspect_destinia_state_interface) {
-    height: 90vh;  /* make the legacy state-edit dialog always full height */
-    max-height: 90vh;
-}
-#aspect_destinia_state_interface {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-}
-#aspect_destinia_state_interface #filter_bar {
-    margin: 1em 0;  /* Filter bar vertical margins */
-}
-#aspect_destinia_state_interface #filter_bar .qvink_interface_card button {
-    width: 100%;
-}
-#aspect_destinia_state_interface #filter_bar .qvink_interface_card label {
-    width: fit-content;
-    margin: auto;
-}
-
-#aspect_destinia_state_interface table {
-    overflow-y: auto;
-    display: block;
-}
-#aspect_destinia_state_interface button.menu_button i {
-    margin-right: 1em;  /* buttons with icon before text needs margin after the icon */
-}
-#aspect_destinia_state_interface #bulk_regex, #aspect_destinia_state_interface #bulk_delete, #aspect_destinia_state_interface #bulk_summarize  {
-    color: red;
-}
-#aspect_destinia_state_interface #regex_selector  {
-    margin: 0;
-}
-#aspect_destinia_state_interface table thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;  /* to be above the body when scrolling */
-    background: var(--SmartThemeBlurTintColor)
-}
-#aspect_destinia_state_interface table {
-    border-collapse: collapse;  /* needed to have borders around cells */
-}
-#aspect_destinia_state_interface table tr.last_in_context_top {
-    border-top: 3px dotted var(--SmartThemeQuoteColor) !important;
-}
-#aspect_destinia_state_interface table tr.last_in_context_bottom {
-    border-bottom: 3px dotted var(--SmartThemeQuoteColor) !important;
-}
-#aspect_destinia_state_interface table tbody td {
-    position: relative;  /* to be under the head when scrolling */
-}
-#aspect_destinia_state_interface table td.interface_summary {
-    width: 100%;
-}
-#aspect_destinia_state_interface table td.interface_summary textarea {
-    margin: 0;
-    overflow-y: hidden;
-}
-#aspect_destinia_state_interface table td.interface_summary textarea span.state_edit_regex_match {
-    color: red;
-}
-#aspect_destinia_state_interface table tr:has(input.interface_message_select:checked, textarea:focus) {
-    background-color: var(--white30a);  /* highlight selected rows */
-}
-#aspect_destinia_state_interface table td.interface_summary i {  /* edit icon */
-    position: absolute;
-    top: 0;
-    right: 0;
-    margin: 0.2em;
-    scale: 0.6;
-    color: var(--white20a);
-}
-#aspect_destinia_state_interface table td div.interface_actions {
-    display: flex;
-    margin: 2px;
-}
-
-#aspect_destinia_state_interface #selected_count {
-    font-weight: bold;
 }
 
 /* --- Aspect: Destinia archived UI styles --- */

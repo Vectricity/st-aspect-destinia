@@ -2432,14 +2432,6 @@ function refresh_settings() {
     update_preset_dropdown()
     check_preset_valid()
 
-    // auto_summarize_message_limit must be >= auto_summarize_batch_size (unless the limit is disabled, i.e. -1)
-    let auto_limit = get_settings('auto_summarize_message_limit')
-    let batch_size = get_settings('auto_summarize_batch_size')
-    if (auto_limit >= 0 && (auto_limit < batch_size)) {
-        set_settings('auto_summarize_message_limit', get_settings('auto_summarize_batch_size'));
-        toast("The auto-summarize message limit must be greater than or equal to the batch size.", "warning")
-    }
-
     // update the save icon highlight
     update_save_icon_highlight();
 
