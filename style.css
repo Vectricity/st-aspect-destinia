@@ -820,20 +820,26 @@ We need the specificity to override some theme styles.
     display: inline-block;
     width: 1.15rem;
     height: 1.15rem;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
     vertical-align: text-bottom;
     flex: 0 0 1.15rem;
+    background-color: currentColor;
     color: var(--SmartThemeBodyColor);
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    -webkit-mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: contain;
 }
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg.is-checked {
-    background-image: url('./icons/checkbox_checked.svg');
+    -webkit-mask-image: url('./icons/checkbox_checked.svg');
+    mask-image: url('./icons/checkbox_checked.svg');
 }
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg.is-unchecked {
-    background-image: url('./icons/checkbox_unchecked.svg');
+    -webkit-mask-image: url('./icons/checkbox_unchecked.svg');
+    mask-image: url('./icons/checkbox_unchecked.svg');
 }
 
 .aspect-destinia-busy-indicator {
