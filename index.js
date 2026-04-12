@@ -77,7 +77,7 @@ const LABEL_HELP = Object.freeze({
     current_plot_point_template: 'Template used to inject the active plot point\'s identifying details, summary, steering, and pace.',
     next_plot_point_template: 'Template used to inject the upcoming plot point information when foreshadowing or transition context is allowed.',
     transition_template: 'Template used to describe the transition requirements between the current and next plot point.',
-    objective_mode_template: 'Template used when objective-based progression rules are active for the current plot point.',
+    objective_guidance_template: 'Template used to present the current plot point objectives as guidance for the assistant.',
     stagnation_instruction: 'Instruction appended when evaluation indicates the story should remain on the current plot point.',
     progression_instruction: 'Instruction appended when evaluation indicates the story may move toward the next plot point.',
     pacing_instruction: 'Template describing how strictness and pacing-bias settings should affect guidance behavior.',
@@ -206,9 +206,9 @@ const TEMPLATE_VALIDATION_RULES = Object.freeze({
         label: 'Transition Template',
         requiredTokens: ['{{transitionGuidance}}'],
     },
-    objective_mode_template: {
+    objective_guidance_template: {
         type: 'template',
-        label: 'Objective Mode Template',
+        label: 'Objective Guidance Template',
         requiredTokens: ['{{currentObjectives}}'],
     },
     stagnation_instruction: {
@@ -270,7 +270,7 @@ const default_settings = {
     current_plot_point_template: 'Active story: {{storyTitle}}\nStory style: {{storyStyle}}\nCurrent plot point index: {{currentIndex}} / {{totalPlotPoints}}\nCurrent plot point title: {{currentTitle}}\nCurrent plot point summary: {{currentSummary}}\nCurrent plot point steering: {{currentSteering}}\nCurrent plot point pace: {{currentPace}}',
     next_plot_point_template: 'Next plot point title: {{nextTitle}}\nNext plot point summary: {{nextSummary}}\nOnly foreshadow or transition toward it when the current plot point is ready and the user\'s roleplay direction supports it.',
     transition_template: 'Transition requirements from the current plot point to the next plot point:\n{{transitionGuidance}}',
-    objective_mode_template: 'Use objective-based progression rules for the current plot point.\nCurrent plot point objectives:\n{{currentObjectives}}',
+    objective_guidance_template: 'Use the current plot point objectives to guide what the assistant should support, set up, and make reachable in the scene.\nCurrent plot point objectives:\n{{currentObjectives}}',
     stagnation_instruction: 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.',
     progression_instruction: 'Current user-direction signal: allow movement toward the next plot point. Transition smoothly through natural consequences rather than abrupt narration.',
     pacing_instruction: 'Strictness value: {{strictness}}\nPacing bias value: {{pacingBias}}\nLower strictness means more freedom and softer canon guidance.\nHigher strictness means stronger canon alignment while still respecting user agency.\nLower pacing bias means slower development; higher pacing bias means more visible narrative momentum.',
@@ -629,7 +629,7 @@ function buildDestiniaGuidance() {
         .replaceAll('{{nextSummary}}', next?.summary || '');
     const transitionTemplate = String(get_settings('transition_template') || 'Transition Guidance: {{transitionGuidance}}')
         .replaceAll('{{transitionGuidance}}', current.transitionGuidance || '');
-    const objectiveModeTemplate = String(get_settings('objective_mode_template') || 'Current Objectives:\n{{currentObjectives}}')
+    const objectiveGuidanceTemplate = String(get_settings('objective_guidance_template') || 'Current Objectives:\n{{currentObjectives}}')
         .replaceAll('{{currentObjectives}}', objectiveLines);
     const foreshadowingTemplate = String(get_settings('foreshadowing_template') || 'Foreshadowing: {{nextTitle}} — {{nextSummary}}')
         .replaceAll('{{nextTitle}}', next?.title || 'None')
@@ -647,7 +647,7 @@ function buildDestiniaGuidance() {
         currentPlotTemplate,
         transitionTemplate,
         pacingInstruction,
-        objectiveModeTemplate,
+        objectiveGuidanceTemplate,
         includeNextPlotTemplate ? nextPlotTemplate : '',
         includeForeshadowingTemplate ? foreshadowingTemplate : '',
         ['intent', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
@@ -964,7 +964,7 @@ const FIELD_DEFAULTS = {
     current_plot_point_template: () => default_settings.current_plot_point_template,
     next_plot_point_template: () => default_settings.next_plot_point_template,
     transition_template: () => default_settings.transition_template,
-    objective_mode_template: () => default_settings.objective_mode_template,
+    objective_guidance_template: () => default_settings.objective_guidance_template,
     stagnation_instruction: () => default_settings.stagnation_instruction,
     progression_instruction: () => default_settings.progression_instruction,
     pacing_instruction: () => default_settings.pacing_instruction,
@@ -1126,7 +1126,7 @@ function addInfoTipsToSettings() {
         current_plot_point_template: 'current_plot_point_template',
         next_plot_point_template: 'next_plot_point_template',
         transition_template: 'transition_template',
-        objective_mode_template: 'objective_mode_template',
+        objective_guidance_template: 'objective_guidance_template',
         stagnation_instruction: 'stagnation_instruction',
         progression_instruction: 'progression_instruction',
         pacing_instruction: 'pacing_instruction',
@@ -3245,7 +3245,7 @@ function initialize_settings_listeners() {
     bind_setting('#current_plot_point_template', 'current_plot_point_template', 'text');
     bind_setting('#next_plot_point_template', 'next_plot_point_template', 'text');
     bind_setting('#transition_template', 'transition_template', 'text');
-    bind_setting('#objective_mode_template', 'objective_mode_template', 'text');
+    bind_setting('#objective_guidance_template', 'objective_guidance_template', 'text');
     bind_setting('#stagnation_instruction', 'stagnation_instruction', 'text');
     bind_setting('#progression_instruction', 'progression_instruction', 'text');
     bind_setting('#pacing_instruction', 'pacing_instruction', 'text');
@@ -3262,7 +3262,7 @@ function initialize_settings_listeners() {
     bindTextAreaLauncher('#current_plot_point_template', 'current_plot_point_template', 'Current Plot Point Template');
     bindTextAreaLauncher('#next_plot_point_template', 'next_plot_point_template', 'Next Plot Point Template');
     bindTextAreaLauncher('#transition_template', 'transition_template', 'Transition Template');
-    bindTextAreaLauncher('#objective_mode_template', 'objective_mode_template', 'Objective Mode Template');
+    bindTextAreaLauncher('#objective_guidance_template', 'objective_guidance_template', 'Objective Guidance Template');
     bindTextAreaLauncher('#stagnation_instruction', 'stagnation_instruction', 'Stagnation Instruction');
     bindTextAreaLauncher('#progression_instruction', 'progression_instruction', 'Progression Instruction');
     bindTextAreaLauncher('#pacing_instruction', 'pacing_instruction', 'Pacing Instruction');
