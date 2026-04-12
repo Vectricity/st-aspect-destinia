@@ -2854,7 +2854,7 @@ function buildDiagnosticDrawerShell(innerHtml = '', isLoading = false) {
                     <div class="aspect-destinia-diagnostic-timeline-label">Timeline (Diagnostics)</div>
                 </div>
                 <div class="aspect-destinia-diagnostic-box">
-                    <div class="aspect-destinia-diagnostic-content"><span>${innerHtml}</span></div>
+                    <div class="aspect-destinia-diagnostic-content">${innerHtml}</div>
                 </div>
             </div>
         </div>
@@ -2900,22 +2900,29 @@ function update_message_visuals(i, style=true, text=null) {
     const message_element = div_element.find('div.mes_text');
     let rendered = text;
     if (!rendered) {
-        const lines = [];
-        if (currentPlot) lines.push(`**Plot Point:** ${currentPlot}`);
-        if (decision) lines.push(`**Intent:** ${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`);
+        const sections = [];
+        if (currentPlot) {
+            sections.push(`<div><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
+        }
+        if (decision) {
+            const decisionText = `${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`;
+            sections.push(`<div><strong>Intent:</strong> ${clean_string_for_html(decisionText)}</div>`);
+        }
         if (objectiveState.length) {
-            lines.push('**Objectives:**');
+            sections.push('<div><strong>Objectives:</strong></div>');
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                lines.push(`**${done ? '☑' : '☐'}** ${label}`);
-                lines.push(`• **Reason:** ${objectiveReason}`);
+                sections.push(`<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-icon-svg ${done ? 'is-checked' : 'is-unchecked'}" aria-hidden="true"></span><span>${clean_string_for_html(label)}</span></div>`);
+                sections.push(`<div>• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div>`);
             });
         }
-        rendered = lines.join('\n');
+        rendered = sections.join('');
     }
 
-    rendered = messageFormatting(clean_string_for_html(rendered), null, false, false, -1);
+    if (text) {
+        rendered = messageFormatting(clean_string_for_html(rendered), null, false, false, -1);
+    }
     const state_div = $(buildDiagnosticDrawerShell(rendered, isLoadingDiagnostic));
     const drawer = state_div.find('.aspect-destinia-diagnostic-drawer');
     if (isLoadingDiagnostic) {
