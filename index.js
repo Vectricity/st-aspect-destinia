@@ -256,7 +256,7 @@ const default_settings = {
     dest_enabled: true,
     timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     advancement_mode: 'objectives',
-    progression_rule: 'intent',
+    progression_rule: 'objective_completion',
     foreshadow_next_plot_point: true,
     messages_evaluated: 'both',
     timeline_deviation_allowed: false,
@@ -961,7 +961,7 @@ const FIELD_DEFAULTS = {
     next_plot_point_template: () => default_settings.next_plot_point_template,
     transition_template: () => default_settings.transition_template,
     objective_guidance_template: () => default_settings.objective_guidance_template,
-    stagnation_instruction: () => default_settings.stagnation_instruction,
+    intent_progression_rule: () => default_settings.intent_progression_rule,
     progression_instruction: () => default_settings.progression_instruction,
     pacing_instruction: () => default_settings.pacing_instruction,
     objective_completion_guidance: () => default_settings.objective_completion_guidance,
@@ -2385,7 +2385,7 @@ async function clearCurrentChatMessages() {
 }
 async function freshResetExtensionState() {
     const ctx = getContext();
-    const confirmed = await ctx.Popup.show.confirm('Fresh reset extension state for the current chat?', 'This will clear current diagnostics, reset the current plot point to the beginning, clear objective completion state, and restore the visible timeline objective booleans for the current chat to false. It will not delete your timeline presets or profile definitions.', { okButton: 'Reset', cancelButton: 'Cancel' });
+    const confirmed = await ctx.Popup.show.confirm('Fresh reset extension state for the current chat?', 'This will clear current diagnostics, reset the current plot point to the beginning, clear objective completion state, restore the visible timeline objective booleans for the current chat to false, and restore the visible settings inputs to their current profile values. It will not delete your timeline presets or profile definitions.', { okButton: 'Reset', cancelButton: 'Cancel' });
     if (!confirmed) return;
 
     set_settings('current_plot_index', 0);
