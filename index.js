@@ -3250,20 +3250,6 @@ function initialize_settings_listeners() {
 
     refresh_settings();
 }
-function initialize_message_buttons() {
-    debug("Legacy message action buttons remain disabled during the Aspect: Destinia rebuild");
-    let ctx = getContext();
-    let $chat = $("div#chat");
-
-    $chat.on("click", ".mes_hide", async () => {
-        await ctx.saveChat();
-        refresh_guidance();
-    });
-    $chat.on("click", ".mes_unhide", async () => {
-        await ctx.saveChat();
-        refresh_guidance();
-    });
-}
 function initialize_slash_commands() {
     let ctx = getContext()
     let SlashCommandParser = ctx.SlashCommandParser
@@ -3375,7 +3361,6 @@ jQuery(async function () {
 
     // initialize UI stuff
     initialize_settings_listeners();
-    initialize_message_buttons();
     initialize_slash_commands();
     initialize_menu_buttons();
     add_i18n()
