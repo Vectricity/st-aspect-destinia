@@ -305,7 +305,6 @@ const global_settings = {
     profile: 'Default', // Current profile
     notify_on_profile_switch: false,
     global_toggle_state: true,  // global state of guidance (used when a profile uses the global state)
-    disabled_group_characters: {},  // group chat IDs mapped to a list of disabled character keys
     timeline_presets: {},
     selected_timeline_preset: 'default_timeline_preset',
     known_chats: {},
@@ -1904,39 +1903,6 @@ function toggle_chat_enabled(value=null) {
     // scroll to the bottom of the chat
     scrollChatToBottom()
 }
-function character_enabled(character_key) {
-    // check if the given character is enabled for guidance handling in the current chat
-    let group_id = selected_group
-    if (selected_group === null) return true;  // not in group chat, always enabled
-
-    let disabled_characters_settings = get_settings('disabled_group_characters')
-    let disabled_characters = disabled_characters_settings[group_id]
-    if (!disabled_characters) return true;
-    return !disabled_characters.includes(character_key)
-
-}
-function toggle_character_enabled(character_key) {
-    // Toggle whether the given character is enabled for guidance handling in the current chat
-    let group_id = selected_group
-    if (group_id === undefined) return true;  // not in group chat, always enabled
-
-    let disabled_characters_settings = get_settings('disabled_group_characters')
-    let disabled_characters = disabled_characters_settings[group_id] || []
-    let disabled = disabled_characters.includes(character_key)
-
-    if (disabled) {  // if currently disabled, enable by removing it from the disabled set
-        disabled_characters.splice(disabled_characters.indexOf(character_key), 1);
-    } else {  // if enabled, disable by adding it to the disabled set
-        disabled_characters.push(character_key);
-    }
-
-    disabled_characters_settings[group_id] = disabled_characters
-    set_settings('disabled_group_characters', disabled_characters_settings)
-    debug(`${disabled ? "Enabled" : "Disabled"} group character guidance handling (${character_key})`)
-    refresh_guidance()
-}
-
-
 /**
  * Bind a UI element to a setting.
  * @param selector {string} jQuery Selector for the UI element
@@ -3298,12 +3264,6 @@ function initialize_message_buttons() {
         refresh_guidance();
     });
 }
-function initialize_group_member_buttons() {
-    debug('Group member guidance toggles are disabled during the Destinia rebuild');
-}
-function set_character_enabled_button_states() {
-    return;
-}
 function initialize_slash_commands() {
     let ctx = getContext()
     let SlashCommandParser = ctx.SlashCommandParser
@@ -3375,15 +3335,6 @@ function initialize_slash_commands() {
         },
     }));
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ad-toggle-config',
-        aliases: ['aspect-destinia-toggle-config'],
-        helpString: 'Toggle the Aspect: Destinia config popout.',
-        callback: () => {
-            toggle_popout();
-            return '';
-        },
-    }));
 }
 
 function add_menu_button(text, fa_icon, callback, hover=null) {
@@ -3407,77 +3358,6 @@ function initialize_menu_buttons() {
 }
 
 
-// Popout handling.
-// We save a jQuery reference to the entire settings content, and move it between the original location and the popout.
-// This is done carefully to preserve all event listeners when moving, and the move is always done before calling remove() on the popout.
-// clone() doesn't work because of the select2 widget for some reason.
-let $settings_element = null;  // all settings content
-let $original_settings_parent = null;  // original location of the settings element
-let $popout = null;  // the popout element
-let POPOUT_VISIBLE = false;
-function initialize_popout() {
-    // initialize the popout logic, creating the $popout object and storing the $settings_element
-
-    // Get the settings element and store it
-    $settings_element = $(`#${settings_div_id}`).find(`.inline-drawer-content .${settings_content_class}`)
-    $original_settings_parent = $settings_element.parent()  // where the settings are originally placed
-
-    debug('Creating popout window...');
-
-    // repurposes the zoomed avatar template (it's a floating div to the left of the chat)
-    $popout = $($('#zoomed_avatar_template').html());
-    $popout.attr('id', 'aspectDestiniaExtensionPopout').removeClass('zoomed_avatar').addClass('draggable').empty();
-
-    // create the control bar with the close button
-    const controlBarHtml = `<div class="panelControlBar flex-container" id="aspectDestiniaExtensionPopoutHeader">
-    <div class="fa-solid fa-grip drag-grabber hoverglow"></div>
-    <div class="fa-solid fa-circle-xmark hoverglow dragClose"></div>
-    </div>`;
-    $popout.append(controlBarHtml)
-
-    loadMovingUIState();
-    dragElement($popout);
-
-    // when escape is pressed, toggle the popout.
-    // This has to be here because ST removes .draggable items when escape is pressed, destroying the popout.
-    $(document).on('keydown', async function (event) {
-         if (event.key === 'Escape') {
-             close_popout()
-         }
-    });
-}
-function open_popout() {
-    debug("Showing popout")
-    $('body').append($popout);  // add the popout to the body
-    loadMovingUIState()
-    dragElement($popout)
-
-    // setup listener for close button to remove the popout
-    $popout.find('.dragClose').off('click').on('click', function () {
-        close_popout()
-    });
-
-    $settings_element.appendTo($popout)  // move the settings to the popout
-    $popout.fadeIn(animation_duration);
-    POPOUT_VISIBLE = true
-}
-function close_popout() {
-    debug("Hiding popout")
-    $popout.fadeOut(animation_duration, () => {
-        $settings_element.appendTo($original_settings_parent)  // move the settings back
-        $popout.remove()  // remove the popout
-    });
-    POPOUT_VISIBLE = false
-}
-function toggle_popout() {
-    // toggle the popout window
-    if (POPOUT_VISIBLE) {
-        close_popout()
-    } else {
-        open_popout()
-    }
-}
-
 // Entry point
 jQuery(async function () {
     log(`Loading extension...`)
@@ -3495,9 +3375,7 @@ jQuery(async function () {
 
     // initialize UI stuff
     initialize_settings_listeners();
-    initialize_popout()
     initialize_message_buttons();
-    initialize_group_member_buttons();
     initialize_slash_commands();
     initialize_menu_buttons();
     add_i18n()
@@ -3513,8 +3391,6 @@ jQuery(async function () {
     eventSource.on(event_types.MESSAGE_SWIPED, (id) => on_chat_event('message_swiped', id));
     eventSource.on(event_types.CHAT_CHANGED, () => on_chat_event('chat_changed'));
     eventSource.on(event_types.MORE_MESSAGES_LOADED, refresh_guidance)
-    eventSource.on('groupSelected', set_character_enabled_button_states)
-    eventSource.on(event_types.GROUP_UPDATED, set_character_enabled_button_states)
     eventSource.on(event_types.SETTINGS_UPDATED, refresh_settings)  // refresh extension settings when ST settings change
     eventSource.on(event_types.GENERATION_STARTED, (type, stuff, dry) => on_chat_event('before_message', {'type': type, 'dry': dry}))
 
