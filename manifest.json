@@ -10,6 +10,7 @@
     "version": "0.2.1",
     "homePage": "https://github.com/Vectricity/st-aspect-destinia",
     "i18n": {
+        "en-us": "locales/en-us.json",
         "zh-tw": "locales/zh-tw.json"
     }
 }

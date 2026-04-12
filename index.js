@@ -2460,12 +2460,6 @@ function refresh_settings() {
         $(`.${settings_content_class} .settings_input`).prop('disabled', true);  // disable all settings
     }
 
-    //////////////////////
-    // Settings not in the config
-
-    // set group chat character enable button state
-    set_character_enabled_button_states()
-
 }
 
 function refresh_select2_element(element, selected, options, placeholder="", callback) {
