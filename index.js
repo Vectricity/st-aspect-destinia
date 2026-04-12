@@ -62,7 +62,7 @@ const LABEL_HELP = Object.freeze({
     timeline_deviation_auto_resolve: 'Attempts to guide the story back toward the timeline after deviation.',
     detach: 'Allows plot progression to continue apart from the user\'s active scene.',
     detach_instruction: 'Guidance text explaining how detached progression should behave.',
-    objective_auto_advance: 'Allows objective completion to trigger plot progression when plot stagnation is disabled.',
+    progression_rule: 'Selects what can trigger plot progression: clear user intent, objective completion threshold, either one, or both together.',
     objective_auto_advance_threshold: 'The completion ratio required before objective completion can trigger plot progression.',
     objective_evaluation_method: 'Chooses whether objective completion comes from the integrated evaluator response or per-objective checks.',
     plot_point_transition_threshold: 'Confidence threshold used when judging progression readiness.',
@@ -258,9 +258,8 @@ const default_settings = {
     dest_enabled: true,
     timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     advancement_mode: 'objectives',
-    auto_advance: true,
+    progression_rule: 'intent',
     foreshadow_next_plot_point: true,
-    allow_plot_stagnation: true,
     messages_evaluated: 'both',
     timeline_deviation_allowed: false,
     auto_resolve_deviation: false,
@@ -651,8 +650,8 @@ function buildDestiniaGuidance() {
         objectiveModeTemplate,
         includeNextPlotTemplate ? nextPlotTemplate : '',
         includeForeshadowingTemplate ? foreshadowingTemplate : '',
-        get_settings('allow_plot_stagnation') ? (get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
-        get_settings('auto_advance') ? (get_settings('progression_instruction') || 'If the story is ready to move forward, transition naturally toward the next plot point without breaking immersion.') : '',
+        ['intent', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
+        ['objective_completion', 'either', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('progression_instruction') || 'If the story is ready to move forward, transition naturally toward the next plot point without breaking immersion.') : '',
         get_settings('timeline_deviation_allowed') ? (get_settings('timeline_deviation_instruction') || 'Allow meaningful timeline deviation when roleplay pushes the story off-script.') : '',
         get_settings('auto_resolve_deviation') ? (get_settings('auto_resolve_deviation_instruction') || 'When deviation occurs, guide the story back toward the timeline naturally over time.') : '',
         get_settings('detach_enabled') ? `Detach Mode: ${get_settings('detach_instruction')}` : '',
@@ -813,10 +812,16 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             const completedCount = objectiveCompletion.filter(Boolean).length;
             const objectiveRatio = currentObjectives.length ? completedCount / currentObjectives.length : 0;
             const objectiveThreshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
-            const advancementReady = objectiveRatio >= objectiveThreshold;
-            const autoAdvanceAllowed = get_settings('auto_advance') && !get_settings('allow_plot_stagnation');
-            const userDrivenAdvanceAllowed = get_settings('allow_plot_stagnation');
-            if ((autoAdvanceAllowed || userDrivenAdvanceAllowed) && advancementReady && currentIndex < points.length - 1) {
+            const thresholdMet = objectiveRatio >= objectiveThreshold;
+            const progressionRule = String(get_settings('progression_rule') || 'intent');
+            const intentMet = true;
+            const shouldAdvance = (
+                (progressionRule === 'intent' && intentMet) ||
+                (progressionRule === 'objective_completion' && thresholdMet) ||
+                (progressionRule === 'either' && (intentMet || thresholdMet)) ||
+                (progressionRule === 'both' && intentMet && thresholdMet)
+            );
+            if (shouldAdvance && currentIndex < points.length - 1) {
                 set_settings('current_plot_index', currentIndex + 1);
                 diagnostic.did_advance = true;
             }
@@ -1091,8 +1096,8 @@ function addInfoTipsToSettings() {
     appendInfoTip(detachLabel, 'detach', 'Explain Detach');
     const detachInstructionLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Detach Instruction');
     appendInfoTip(detachInstructionLabel, 'detach_instruction', 'Explain Detach Instruction');
-    const autoAdvanceLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Completion Triggers Plot Progression');
-    appendInfoTip(autoAdvanceLabel, 'objective_auto_advance', 'Explain Objective Completion Triggers Plot Progression');
+    const progressionRuleLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Rules');
+    appendInfoTip(progressionRuleLabel, 'progression_rule', 'Explain Plot Progression Rules');
     const autoAdvanceThresholdLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Completion Trigger Threshold');
     appendInfoTip(autoAdvanceThresholdLabel, 'objective_auto_advance_threshold', 'Explain Objective Completion Trigger Threshold');
     const objectiveEvaluationMethodLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Evaluation Method');
@@ -1107,8 +1112,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(pacingBiasLabel, 'plot_progression_aggressiveness', 'Explain Plot Progression Aggressiveness');
     const foreshadowingLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Foreshadowing');
     appendInfoTip(foreshadowingLabel, 'plot_foreshadowing', 'Explain Plot Foreshadowing');
-    const stagnationLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Stagnation');
-    appendInfoTip(stagnationLabel, 'plot_stagnation', 'Explain Plot Stagnation');
     const guidanceFieldsTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Injected Guidance Fields');
     appendInfoTip(guidanceFieldsTitle, 'injected_guidance_fields', 'Explain Injected Guidance Fields');
 
@@ -2477,18 +2480,6 @@ function refresh_settings() {
         $(`.${settings_content_class} .settings_input`).prop('disabled', true);  // disable all settings
     }
 
-    const autoAdvanceToggle = document.querySelector(`.${settings_content_class} #auto_advance`);
-    const autoAdvanceField = autoAdvanceToggle?.closest('.aspect-destinia-field');
-    const plotStagnationEnabled = Boolean(get_settings('allow_plot_stagnation'));
-    if (autoAdvanceToggle) {
-        autoAdvanceToggle.disabled = plotStagnationEnabled;
-        autoAdvanceToggle.checked = plotStagnationEnabled ? false : Boolean(get_settings('auto_advance'));
-    }
-    if (autoAdvanceField) {
-        autoAdvanceField.classList.toggle('disabled_hint', plotStagnationEnabled);
-        autoAdvanceField.title = plotStagnationEnabled ? 'Plot Stagnation is enabled.' : '';
-    }
-
     //////////////////////
     // Settings not in the config
 
@@ -3233,9 +3224,8 @@ function initialize_settings_listeners() {
     bind_setting('#objective_auto_advance_threshold', 'objective_auto_advance_threshold', 'number');
     bind_setting('#objective_evaluation_method', 'objective_evaluation_method', 'text');
     bind_setting('#intent_window', 'intent_window', 'number');
-    bind_setting('#auto_advance', 'auto_advance', 'boolean');
+    bind_setting('#progression_rule', 'progression_rule', 'text');
     bind_setting('#foreshadow_next_plot_point', 'foreshadow_next_plot_point', 'boolean');
-    bind_setting('#allow_plot_stagnation', 'allow_plot_stagnation', 'boolean');
     bind_setting('input[name="messages_evaluated"]', 'messages_evaluated', 'text');
     bind_setting('#timeline_deviation_allowed', 'timeline_deviation_allowed', 'boolean');
     bind_setting('#auto_resolve_deviation', 'auto_resolve_deviation', 'boolean');

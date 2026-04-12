@@ -129,17 +129,18 @@
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-grid three">
                             <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Plot Progression Rules</label>
+                                <select id="progression_rule">
+                                    <option value="intent">Intent</option>
+                                    <option value="objective_completion">Objective Completion</option>
+                                    <option value="either">Either</option>
+                                    <option value="both">Both</option>
+                                </select>
+                            </div>
+                            <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Completion Trigger Threshold</label>
                                 <input id="objective_auto_advance_threshold" type="range" min="0.5" max="1" step="0.05" />
                                 <div class="aspect-destinia-slider-meta"><span id="objective_auto_advance_threshold_value" class="aspect-destinia-slider-value"></span></div>
-                            </div>
-                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
-                                <label class="aspect-destinia-label">Objective Completion Triggers Plot Progression</label>
-                                <div class="checkbox_label"><input id="auto_advance" type="checkbox" /><label for="auto_advance" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
-                            </div>
-                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
-                                <label class="aspect-destinia-label">Plot Stagnation</label>
-                                <div class="checkbox_label"><input id="allow_plot_stagnation" type="checkbox" /><label for="allow_plot_stagnation" class="aspect-destinia-checkbox-label-text">Enabled</label></div>
                             </div>
                             <div class="aspect-destinia-field">
                                 <label class="aspect-destinia-label">Objective Evaluation Method</label>
