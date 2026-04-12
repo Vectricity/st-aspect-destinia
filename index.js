@@ -2908,7 +2908,7 @@ function update_message_visuals(i, style=true, text=null) {
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                lines.push(`${done ? '☑' : '☐'} ${label}`);
+                lines.push(`**${done ? '☑' : '☐'}** ${label}`);
                 lines.push(`• **Reason:** ${objectiveReason}`);
             });
         }
