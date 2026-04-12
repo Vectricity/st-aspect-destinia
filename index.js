@@ -136,16 +136,15 @@ const DEFAULT_TIMELINE_TEMPLATE = {
 const DEFAULT_EVALUATOR_PROMPT = `You are evaluating roleplay progression for a story timeline controller.
 Read the recent chat and determine whether the conversation should stagnate on the current plot point or progress toward the next plot point.
 Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.
-Only mark plot_stagnation as true when the conversation clearly supports remaining on the current plot point, such as explicit requests to delay progression, clearly unfinished in-plot-point work, or an important unresolved conversation that should continue before progressing.
 Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.
 {{objectiveCompletionGuidance}}
+Apply the active plot progression rule exactly as written below.
+{{progressionRuleInstruction}}
 Return ONLY valid JSON with these keys:
 {
   "decision": "stagnate" | "progress",
   "confidence": 0.0,
   "reason": "short explanation",
-  "plot_point_complete": true,
-  "plot_stagnation": true,
   "objective_completion": [true, false],
   "objective_reasons": ["short explanation per objective", "short explanation per objective"]
 }
@@ -155,6 +154,7 @@ Current plot point title: {{currentTitle}}
 Current plot point summary: {{currentSummary}}
 Current objectives: {{currentObjectives}}
 Current objective completion booleans: {{currentObjectiveCompletion}}
+Objective completion trigger threshold: {{objectiveCompletionTriggerThreshold}}
 Next plot point title: {{nextTitle}}
 Next plot point summary: {{nextSummary}}
 Recent chat selected for evaluation:
@@ -683,10 +683,27 @@ function getRecentEvaluationContext() {
         recentUserChat,
     };
 }
+function getProgressionRuleInstruction() {
+    const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
+    const thresholdPercent = Math.round(threshold * 100);
+    const stagnationInstruction = get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.';
+    const progressionRule = String(get_settings('progression_rule') || 'intent');
+
+    if (progressionRule === 'objective_completion') {
+        return `Active plot progression rule: Objective Completion. Mark decision as progress only when the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. Clear user intent alone is not enough unless that intent also produces enough completed objectives to meet the threshold.`;
+    }
+    if (progressionRule === 'either') {
+        return `Active plot progression rule: Either. Mark decision as progress when either condition is met: (1) the user clearly shows intent to move into the next plot point, or (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. If neither condition is met, mark stagnate.`;
+    }
+    if (progressionRule === 'both') {
+        return `Active plot progression rule: Both. Mark decision as progress only when both conditions are met: (1) the user clearly shows intent to move into the next plot point, and (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. If either condition is missing, mark stagnate.`;
+    }
+    return `Active plot progression rule: Intent. ${stagnationInstruction} Mark decision as progress only when the user clearly initiates movement toward the next plot point. Objective completion threshold alone is not enough in this mode.`;
+}
 function buildDestiniaEvaluatorPrompt() {
     const { timeline, current, next } = getCurrentPlotPoint();
     if (!current) return '';
-    const { recentChat, recentUserChat } = getRecentEvaluationContext();
+    const { recentChat } = getRecentEvaluationContext();
     const replace = {
         '{{storyTitle}}': timeline.storyTitle,
         '{{storyStyle}}': timeline.systemStyle,
@@ -694,10 +711,12 @@ function buildDestiniaEvaluatorPrompt() {
         '{{currentSummary}}': current.summary,
         '{{currentObjectives}}': JSON.stringify(current.objectives || []),
         '{{currentObjectiveCompletion}}': JSON.stringify(get_settings('last_objective_completion') || []),
+        '{{objectiveCompletionTriggerThreshold}}': String(Number(get_settings('objective_auto_advance_threshold')) || 0),
         '{{nextTitle}}': next?.title || 'None',
         '{{nextSummary}}': next?.summary || 'None',
         '{{recentChat}}': recentChat.map(message => `${message?.is_user ? 'User' : 'Assistant'}: ${message?.mes || ''}`).join('\n'),
         '{{objectiveCompletionGuidance}}': get_settings('objective_completion_guidance') || 'Only mark objective completion when the user meaningfully demonstrates progress relevant to the current plot point.',
+        '{{progressionRuleInstruction}}': getProgressionRuleInstruction(),
     };
     let prompt = String(get_settings('evaluator_prompt') || DEFAULT_EVALUATOR_PROMPT);
     for (const [token, value] of Object.entries(replace)) {
@@ -808,23 +827,9 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             objective_reasons: objectiveResults.map((result) => String(result?.reason || '')),
             did_advance: false,
         };
-        if (decision === 'advance') {
-            const completedCount = objectiveCompletion.filter(Boolean).length;
-            const objectiveRatio = currentObjectives.length ? completedCount / currentObjectives.length : 0;
-            const objectiveThreshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
-            const thresholdMet = objectiveRatio >= objectiveThreshold;
-            const progressionRule = String(get_settings('progression_rule') || 'intent');
-            const intentMet = true;
-            const shouldAdvance = (
-                (progressionRule === 'intent' && intentMet) ||
-                (progressionRule === 'objective_completion' && thresholdMet) ||
-                (progressionRule === 'either' && (intentMet || thresholdMet)) ||
-                (progressionRule === 'both' && intentMet && thresholdMet)
-            );
-            if (shouldAdvance && currentIndex < points.length - 1) {
-                set_settings('current_plot_index', currentIndex + 1);
-                diagnostic.did_advance = true;
-            }
+        if (decision === 'advance' && currentIndex < points.length - 1) {
+            set_settings('current_plot_index', currentIndex + 1);
+            diagnostic.did_advance = true;
         }
         if (targetMessage) {
             const targetIndex = getContext().chat.indexOf(targetMessage);
