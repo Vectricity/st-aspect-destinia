@@ -813,6 +813,7 @@ We need the specificity to override some theme styles.
 
 #chat .aspect-destinia-diagnostic-objective-icon {
     min-width: 1em;
+    font-weight: 700;
 }
 
 .aspect-destinia-busy-indicator {

@@ -2075,10 +2075,6 @@ function update_profile_section() {
     let $chatProfileSelect = $(`.${settings_content_class} #chat_profile_select`);
     const profileElement = $choose_profile_dropdown.get(0);
     const chatProfileElement = $chatProfileSelect.get(0);
-    let $character = $('button#character_profile')
-    let $chat = $('button#chat_profile')
-    let $character_icon = $character.find('i')
-    let $chat_icon = $chat.find('i')
 
     if (document.activeElement !== profileElement) {
         $choose_profile_dropdown.empty();
@@ -2113,29 +2109,6 @@ function update_profile_section() {
         }
     }
 
-    let lock_class = 'fa-lock'
-    let unlock_class = 'fa-unlock'
-    let highlight_class = 'button_highlight'
-
-    if (current_character_profile === current_profile) {
-        $character.addClass(highlight_class);
-        $character_icon.removeClass(unlock_class)
-        $character_icon.addClass(lock_class)
-    } else {
-        $character.removeClass(highlight_class)
-        $character_icon.removeClass(lock_class)
-        $character_icon.addClass(unlock_class)
-    }
-
-    if (current_chat_profile === current_profile) {
-        $chat.addClass(highlight_class);
-        $chat_icon.removeClass(unlock_class)
-        $chat_icon.addClass(lock_class)
-    } else {
-        $chat.removeClass(highlight_class)
-        $chat_icon.removeClass(lock_class)
-        $chat_icon.addClass(unlock_class)
-    }
 }
 
 function updateTimelinePresetControls() {
@@ -3179,8 +3152,6 @@ function initialize_settings_listeners() {
     }, false)
     bind_function('#import_file', async (e) => await import_profile(e), false)
 
-    bind_function('#character_profile', () => toggle_character_profile());
-    bind_function('#chat_profile', () => toggle_chat_profile());
     bind_function('#chat_profile_select', (event) => {
         attach_profile_to_selected_known_chat($(event.target).val());
     }, false);
