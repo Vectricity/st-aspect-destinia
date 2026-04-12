@@ -826,7 +826,6 @@ We need the specificity to override some theme styles.
     vertical-align: text-bottom;
     flex: 0 0 1.15rem;
     color: var(--SmartThemeBodyColor);
-    filter: drop-shadow(0 0 0.15px currentColor);
 }
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg.is-checked {
