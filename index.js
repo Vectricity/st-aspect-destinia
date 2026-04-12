@@ -1946,13 +1946,13 @@ function bind_setting(selector, key, type=null, callback=null, disable=true) {
     // Bind a UI element to a setting, so if the UI element changes, the setting is updated
     selector = `.${settings_content_class} ${selector}`  // add the settings div to the selector
     let element = $(selector)
-    settings_ui_map[key] = [element, type]
-
-    // if no elements found, log error
     if (element.length === 0) {
         error(`No element found for selector [${selector}] for setting [${key}]`);
         return;
     }
+    settings_ui_map[key] = [element, type]
+
+    // if no elements found, log error
 
     // mark as a settings UI function
     if (disable) {
