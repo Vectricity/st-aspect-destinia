@@ -1417,7 +1417,6 @@ function render_status_panel() {
     if (!statusRoot) return;
 
     const { current, next } = getCurrentPlotPoint();
-    const reason = String(get_settings('last_intent_reason') || '').trim();
     const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
     const objectiveMarkup = currentObjectives.length
         ? currentObjectives.map((objective) => {
@@ -1446,10 +1445,6 @@ function render_status_panel() {
                 <div class="aspect-destinia-stat-value">${clean_string_for_html(format_percent(get_settings('last_intent_confidence')))}</div>
             </div>
         </div>
-        ${reason ? `
-        <div class="aspect-destinia-status-reason">
-            ${clean_string_for_html(reason)}
-        </div>` : ''}
         <div class="aspect-destinia-objective-list">
             <div class="aspect-destinia-section-title aspect-destinia-objective-label">Current Objectives</div>
             ${objectiveMarkup}
