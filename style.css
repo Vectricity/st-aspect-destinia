@@ -580,6 +580,7 @@ We need the specificity to override some theme styles.
 
 #aspect_destinia_root .aspect-destinia-objective-icon {
     min-width: 1em;
+    font-weight: 700;
 }
 
 #chat .aspect-destinia-diagnostic-container {
