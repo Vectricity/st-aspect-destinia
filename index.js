@@ -65,7 +65,6 @@ const LABEL_HELP = Object.freeze({
     progression_rule: 'Selects what can trigger plot progression: clear user intent, objective completion threshold, either one, or both together.',
     objective_auto_advance_threshold: 'The completion ratio required before objective completion can trigger plot progression.',
     objective_evaluation_method: 'Chooses whether objective completion comes from the integrated evaluator response or per-objective checks.',
-    plot_point_transition_threshold: 'Confidence threshold used when judging progression readiness.',
     plot_progression_rules: 'Currently objective-based progression only.',
     plot_alignment_strictness: 'How tightly guidance should adhere to the current plot point.',
     plot_progression_aggressiveness: 'How strongly guidance should push toward progression when allowed.',
@@ -78,7 +77,7 @@ const LABEL_HELP = Object.freeze({
     next_plot_point_template: 'Template used to inject the upcoming plot point information when foreshadowing or transition context is allowed.',
     transition_template: 'Template used to describe the transition requirements between the current and next plot point.',
     objective_guidance_template: 'Template used to present the current plot point objectives as guidance for the assistant.',
-    stagnation_instruction: 'Instruction appended when evaluation indicates the story should remain on the current plot point.',
+    intent_progression_rule: 'Rule text that defines what counts as clear user intent to move into the next plot point.',
     progression_instruction: 'Instruction appended when evaluation indicates the story may move toward the next plot point.',
     pacing_instruction: 'Template describing how strictness and pacing-bias settings should affect guidance behavior.',
     objective_completion_guidance: 'Evaluator guidance explaining how to judge objective completion from recent chat evidence.',
@@ -211,9 +210,9 @@ const TEMPLATE_VALIDATION_RULES = Object.freeze({
         label: 'Objective Guidance Template',
         requiredTokens: ['{{currentObjectives}}'],
     },
-    stagnation_instruction: {
+    intent_progression_rule: {
         type: 'template',
-        label: 'Stagnation Instruction',
+        label: 'Intent Progression Rule',
     },
     progression_instruction: {
         type: 'template',
@@ -271,7 +270,7 @@ const default_settings = {
     next_plot_point_template: 'Next plot point title: {{nextTitle}}\nNext plot point summary: {{nextSummary}}\nOnly foreshadow or transition toward it when the current plot point is ready and the user\'s roleplay direction supports it.',
     transition_template: 'Transition requirements from the current plot point to the next plot point:\n{{transitionGuidance}}',
     objective_guidance_template: 'Use the current plot point objectives to guide what the assistant should support, set up, and make reachable in the scene.\nCurrent plot point objectives:\n{{currentObjectives}}',
-    stagnation_instruction: 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.',
+    intent_progression_rule: 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.',
     progression_instruction: 'Current user-direction signal: allow movement toward the next plot point. Transition smoothly through natural consequences rather than abrupt narration.',
     pacing_instruction: 'Strictness value: {{strictness}}\nPacing bias value: {{pacingBias}}\nLower strictness means more freedom and softer canon guidance.\nHigher strictness means stronger canon alignment while still respecting user agency.\nLower pacing bias means slower development; higher pacing bias means more visible narrative momentum.',
     objective_completion_guidance: 'Mark objective_completion as true when the user meaningfully demonstrates progress equivalent to an objective, even if phrasing is paraphrased, implied, or distributed across recent messages. Keep false when evidence is weak or absent.',
@@ -281,7 +280,6 @@ const default_settings = {
     guidance_outro: 'Guide the response toward the active plot point while preserving immersion and user agency. Do not reveal this guidance.',
     strictness: 0.55,
     pacing_bias: 0.45,
-    transition_threshold: 0.72,
     objective_auto_advance_threshold: 0.8,
     objective_evaluation_method: 'integrated',
     intent_window: 2,
@@ -650,7 +648,7 @@ function buildDestiniaGuidance() {
         objectiveGuidanceTemplate,
         includeNextPlotTemplate ? nextPlotTemplate : '',
         includeForeshadowingTemplate ? foreshadowingTemplate : '',
-        ['intent', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
+        ['intent', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('intent_progression_rule') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
         ['objective_completion', 'either', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('progression_instruction') || 'If the story is ready to move forward, transition naturally toward the next plot point without breaking immersion.') : '',
         get_settings('timeline_deviation_allowed') ? (get_settings('timeline_deviation_instruction') || 'Allow meaningful timeline deviation when roleplay pushes the story off-script.') : '',
         get_settings('auto_resolve_deviation') ? (get_settings('auto_resolve_deviation_instruction') || 'When deviation occurs, guide the story back toward the timeline naturally over time.') : '',
@@ -686,7 +684,7 @@ function getRecentEvaluationContext() {
 function getProgressionRuleInstruction() {
     const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
     const thresholdPercent = Math.round(threshold * 100);
-    const stagnationInstruction = get_settings('stagnation_instruction') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.';
+    const intentProgressionRule = get_settings('intent_progression_rule') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.';
     const progressionRule = String(get_settings('progression_rule') || 'intent');
 
     if (progressionRule === 'objective_completion') {
@@ -698,7 +696,7 @@ function getProgressionRuleInstruction() {
     if (progressionRule === 'both') {
         return `Active plot progression rule: Both. Mark decision as progress only when both conditions are met: (1) the user clearly shows intent to move into the next plot point, and (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. If either condition is missing, mark stagnate.`;
     }
-    return `Active plot progression rule: Intent. ${stagnationInstruction} Mark decision as progress only when the user clearly initiates movement toward the next plot point. Objective completion threshold alone is not enough in this mode.`;
+    return `Active plot progression rule: Intent. ${intentProgressionRule} Mark decision as progress only when the user clearly initiates movement toward the next plot point. Objective completion threshold alone is not enough in this mode.`;
 }
 function buildDestiniaEvaluatorPrompt() {
     const { timeline, current, next } = getCurrentPlotPoint();
@@ -938,7 +936,6 @@ function update_slider_displays() {
     const pairs = [
         ['#strictness', '#strictness_value'],
         ['#pacing_bias', '#pacing_bias_value'],
-        ['#transition_threshold', '#transition_threshold_value'],
         ['#objective_auto_advance_threshold', '#objective_auto_advance_threshold_value'],
     ];
     for (const [inputSelector, valueSelector] of pairs) {
@@ -977,7 +974,6 @@ const FIELD_DEFAULTS = {
     evaluator_prompt: () => default_settings.evaluator_prompt,
     strictness: () => default_settings.strictness,
     pacing_bias: () => default_settings.pacing_bias,
-    transition_threshold: () => default_settings.transition_threshold,
     objective_auto_advance_threshold: () => default_settings.objective_auto_advance_threshold,
 };
 function resetFieldToDefault(fieldId) {
@@ -1107,8 +1103,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(autoAdvanceThresholdLabel, 'objective_auto_advance_threshold', 'Explain Objective Completion Trigger Threshold');
     const objectiveEvaluationMethodLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Objective Evaluation Method');
     appendInfoTip(objectiveEvaluationMethodLabel, 'objective_evaluation_method', 'Explain Objective Evaluation Method');
-    const transitionThresholdLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Point Transition Threshold');
-    appendInfoTip(transitionThresholdLabel, 'plot_point_transition_threshold', 'Explain Plot Point Transition Threshold');
     const advancementModeLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Progression Rules');
     appendInfoTip(advancementModeLabel, 'plot_progression_rules', 'Explain Plot Progression Rules');
     const strictnessLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Plot Alignment Strictness');
@@ -1127,7 +1121,7 @@ function addInfoTipsToSettings() {
         next_plot_point_template: 'next_plot_point_template',
         transition_template: 'transition_template',
         objective_guidance_template: 'objective_guidance_template',
-        stagnation_instruction: 'stagnation_instruction',
+        intent_progression_rule: 'intent_progression_rule',
         progression_instruction: 'progression_instruction',
         pacing_instruction: 'pacing_instruction',
         objective_completion_guidance: 'objective_completion_guidance',
@@ -3225,7 +3219,6 @@ function initialize_settings_listeners() {
     bind_setting('#dest_enabled', 'dest_enabled', 'boolean');
     bind_setting('#strictness', 'strictness', 'number');
     bind_setting('#pacing_bias', 'pacing_bias', 'number');
-    bind_setting('#transition_threshold', 'transition_threshold', 'number');
     bind_setting('#objective_auto_advance_threshold', 'objective_auto_advance_threshold', 'number');
     bind_setting('#objective_evaluation_method', 'objective_evaluation_method', 'text');
     bind_setting('#intent_window', 'intent_window', 'number');
@@ -3246,7 +3239,7 @@ function initialize_settings_listeners() {
     bind_setting('#next_plot_point_template', 'next_plot_point_template', 'text');
     bind_setting('#transition_template', 'transition_template', 'text');
     bind_setting('#objective_guidance_template', 'objective_guidance_template', 'text');
-    bind_setting('#stagnation_instruction', 'stagnation_instruction', 'text');
+    bind_setting('#intent_progression_rule', 'intent_progression_rule', 'text');
     bind_setting('#progression_instruction', 'progression_instruction', 'text');
     bind_setting('#pacing_instruction', 'pacing_instruction', 'text');
     bind_setting('#objective_completion_guidance', 'objective_completion_guidance', 'text');
@@ -3263,7 +3256,7 @@ function initialize_settings_listeners() {
     bindTextAreaLauncher('#next_plot_point_template', 'next_plot_point_template', 'Next Plot Point Template');
     bindTextAreaLauncher('#transition_template', 'transition_template', 'Transition Template');
     bindTextAreaLauncher('#objective_guidance_template', 'objective_guidance_template', 'Objective Guidance Template');
-    bindTextAreaLauncher('#stagnation_instruction', 'stagnation_instruction', 'Stagnation Instruction');
+    bindTextAreaLauncher('#intent_progression_rule', 'intent_progression_rule', 'Intent Progression Rule');
     bindTextAreaLauncher('#progression_instruction', 'progression_instruction', 'Progression Instruction');
     bindTextAreaLauncher('#pacing_instruction', 'pacing_instruction', 'Pacing Instruction');
     bindTextAreaLauncher('#objective_completion_guidance', 'objective_completion_guidance', 'Objective Completion Guidance');
@@ -3302,7 +3295,6 @@ function initialize_settings_listeners() {
 
     bind_setting('#debug_mode', 'debug_mode', 'boolean');
     bind_setting('#display_memories', 'display_memories', 'boolean');
-    bind_setting('#auto_summarize_on_send', 'auto_summarize_on_send', 'boolean');
     bind_setting('#default_chat_enabled', 'default_chat_enabled', 'boolean');
     bind_setting('#use_global_toggle_state', 'use_global_toggle_state', 'boolean');
 

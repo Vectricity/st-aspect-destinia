@@ -149,11 +149,6 @@
                                     <option value="per_objective">Per Objective</option>
                                 </select>
                             </div>
-                            <div class="aspect-destinia-field">
-                                <label class="aspect-destinia-label">Plot Point Transition Threshold</label>
-                                <input id="transition_threshold" type="range" min="0.5" max="0.95" step="0.01" />
-                                <div class="aspect-destinia-slider-meta"><span id="transition_threshold_value" class="aspect-destinia-slider-value"></span></div>
-                            </div>
                         </div>
 
                         <div class="aspect-destinia-actions">
@@ -243,10 +238,10 @@
                         <div class="aspect-destinia-grid two">
                             <div class="aspect-destinia-field">
                                 <div class="aspect-destinia-label-row">
-                                    <label class="aspect-destinia-label">Stagnation Instruction</label>
-                                    <span class="aspect-destinia-warning-icon" data-validation-for="stagnation_instruction" hidden title="">⚠️</span>
+                                    <label class="aspect-destinia-label">Intent Progression Rule</label>
+                                    <span class="aspect-destinia-warning-icon" data-validation-for="intent_progression_rule" hidden title="">⚠️</span>
                                 </div>
-                                <textarea id="stagnation_instruction"></textarea>
+                                <textarea id="intent_progression_rule"></textarea>
                             </div>
 
                             <div class="aspect-destinia-field">
@@ -337,7 +332,6 @@
                     <div class="aspect-destinia-card">
                         <div class="aspect-destinia-section-title">Misc.</div>
                         <label class="checkbox_label"><input id="display_memories" type="checkbox" /><span>Display Message State</span></label>
-                        <label class="checkbox_label"><input id="auto_summarize_on_send" type="checkbox" /><span>Refresh Guidance Before Generation</span></label>
                         <label class="checkbox_label"><input id="default_chat_enabled" type="checkbox" /><span>Enable Guidance in New Chats</span></label>
                         <label class="checkbox_label"><input id="use_global_toggle_state" type="checkbox" /><span>Use Global Toggle State</span></label>
                         <label class="checkbox_label"><input id="notify_on_profile_switch" type="checkbox" /><span>Notify on Switch</span></label>
