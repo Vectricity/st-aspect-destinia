@@ -2918,7 +2918,7 @@ function update_message_visuals(i, style=true, text=null) {
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-entry"><div class="aspect-destinia-diagnostic-objective-titlebar">${getDiagnosticCheckboxSvg(done)}<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span></div><div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div></div>`);
+                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-entry"><div class="aspect-destinia-diagnostic-objective-titlebar">${getDiagnosticCheckboxSvg(done)}<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span></div><div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Evaluation:</strong> ${clean_string_for_html(objectiveReason)}</div></div>`);
             });
             sections.push(`<div class="aspect-destinia-diagnostic-objectives">${objectiveRows.join('')}</div>`);
         }
