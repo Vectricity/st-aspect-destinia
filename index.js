@@ -26,7 +26,7 @@ import {
 import { getContext, extension_settings, saveMetadataDebounced} from '../../../extensions.js';
 import { getPresetManager } from '../../../preset-manager.js'
 import { formatInstructModeChat } from '../../../instruct-mode.js';
-import { is_group_generating, selected_group } from '../../../group-chats.js';
+import { selected_group } from '../../../group-chats.js';
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { debounce_timeout } from '../../../constants.js';
@@ -765,38 +765,12 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
 let lastEvaluationKey = '';
 async function waitForEvaluationReady() {
     try {
-        if (selected_group) {
-            await waitUntilCondition(() => is_group_generating === false, 10000, 100);
-        }
         await waitUntilCondition(() => !streamingProcessor || streamingProcessor.isFinished, 15000, 100);
     } catch {
         debug('Evaluation readiness wait timed out while waiting for streaming to finish');
         return false;
     }
     return true;
-}
-function getEvaluationTargetMessage(targetIndex = null) {
-    const context = getContext();
-    const chat = Array.isArray(context.chat) ? context.chat : [];
-    if (!chat.length) return null;
-    const mode = getMessagesEvaluatedMode();
-    const fallbackIndex = typeof targetIndex === 'number' ? targetIndex : chat.length - 1;
-    const boundedIndex = Math.max(0, Math.min(fallbackIndex, chat.length - 1));
-
-    if (mode === 'user') {
-        for (let index = boundedIndex; index >= 0; index -= 1) {
-            if (chat[index]?.is_user) return chat[index];
-        }
-        return null;
-    }
-
-    for (let index = chat.length - 1; index >= 0; index -= 1) {
-        const message = chat[index];
-        if (!message || message.is_user) continue;
-        return message;
-    }
-
-    return chat[boundedIndex] || null;
 }
 function buildEvaluationKey(targetMessage = null) {
     const context = getContext();
@@ -815,8 +789,7 @@ function buildEvaluationKey(targetMessage = null) {
 async function evaluateDestiniaProgress(targetMessage = null) {
     if (!chat_enabled() || !get_settings('dest_enabled')) return null;
     if (!(await waitForEvaluationReady())) return null;
-    const resolvedTargetMessage = targetMessage || getEvaluationTargetMessage();
-    const evaluationKey = buildEvaluationKey(resolvedTargetMessage);
+    const evaluationKey = buildEvaluationKey(targetMessage);
     if (evaluationKey === lastEvaluationKey) {
         debug('Skipping duplicate Destinia evaluation for unchanged evidence');
         return null;
@@ -830,12 +803,12 @@ async function evaluateDestiniaProgress(targetMessage = null) {
     try {
         await set_connection_profile(evaluatorProfile);
         await set_preset(evaluatorPreset);
-        active_diagnostic_loading_index = resolvedTargetMessage ? getContext().chat.indexOf(resolvedTargetMessage) : null;
+        active_diagnostic_loading_index = targetMessage ? getContext().chat.indexOf(targetMessage) : null;
         active_diagnostic_loading_started_at = Date.now();
         update_all_message_visuals();
         trace_debug('EvaluateDestiniaProgress:start', {
-            targetIsUser: Boolean(resolvedTargetMessage?.is_user),
-            targetName: resolvedTargetMessage?.name || '',
+            targetIsUser: Boolean(targetMessage?.is_user),
+            targetName: targetMessage?.name || '',
             evaluatorProfile,
             evaluatorPreset,
             promptLength: prompt.length,
@@ -884,16 +857,16 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             set_settings('current_plot_index', currentIndex + 1);
             diagnostic.did_advance = true;
         }
-        if (resolvedTargetMessage) {
-            const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
-            set_data(resolvedTargetMessage, 'last_intent_decision', decision);
-            set_data(resolvedTargetMessage, 'last_intent_reason', reason);
-            set_data(resolvedTargetMessage, 'current_plot_title', current?.title || '');
-            set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
+        if (targetMessage) {
+            const targetIndex = getContext().chat.indexOf(targetMessage);
+            set_data(targetMessage, 'last_intent_decision', decision);
+            set_data(targetMessage, 'last_intent_reason', reason);
+            set_data(targetMessage, 'current_plot_title', current?.title || '');
+            set_data(targetMessage, 'diagnostic', diagnostic);
             finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
             trace_debug('EvaluateDestiniaProgress:attached', {
-                targetIsUser: Boolean(resolvedTargetMessage?.is_user),
-                targetName: resolvedTargetMessage?.name || '',
+                targetIsUser: Boolean(targetMessage?.is_user),
+                targetName: targetMessage?.name || '',
                 decision,
                 confidence,
                 objectiveCompletion,
@@ -3173,7 +3146,7 @@ async function on_chat_event(event=null, data=null) {
             last_message = index;
             const mode = getMessagesEvaluatedMode();
             if (mode === 'assistant' || mode === 'both') {
-                const assistantMessage = getEvaluationTargetMessage(typeof index === 'number' ? index : null);
+                const assistantMessage = context.chat?.[index] || null;
                 await evaluateDestiniaProgress(assistantMessage);
             }
             refresh_guidance();
