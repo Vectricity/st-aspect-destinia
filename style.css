@@ -795,11 +795,57 @@ We need the specificity to override some theme styles.
 }
 
 
+#chat .aspect-destinia-diagnostic-section {
+    margin-top: 6px;
+}
+
+#chat .aspect-destinia-diagnostic-plot-point {
+    margin-bottom: 8px;
+}
+
 #chat .aspect-destinia-diagnostic-objectives {
-    margin-top: 4px;
+    margin-top: 10px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 10px;
+}
+
+#chat .aspect-destinia-diagnostic-objective-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+#chat .aspect-destinia-diagnostic-objective-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    border-bottom: 0;
+    background: color-mix(in srgb, var(--SmartThemeBorderColor) 72%, transparent);
+    color: inherit;
+}
+
+#chat .aspect-destinia-diagnostic-objective-titlebar .aspect-destinia-diagnostic-objective-icon-svg {
+    flex: 0 0 auto;
+    width: 0.8rem;
+    height: 0.8rem;
+    margin-right: 0;
+    vertical-align: middle;
+}
+
+#chat .aspect-destinia-diagnostic-objective-titletext {
+    display: inline-flex;
+    align-items: center;
+    min-height: 0.8rem;
+    line-height: 1;
+    font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 #chat .aspect-destinia-diagnostic-objective-item {

@@ -2907,20 +2907,20 @@ function update_message_visuals(i, style=true, text=null) {
     if (!rendered) {
         const sections = [];
         if (currentPlot) {
-            sections.push(`<div><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
+            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
         }
         if (decision) {
             const decisionText = `${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`;
-            sections.push(`<div><strong>Intent:</strong> ${clean_string_for_html(decisionText)}</div>`);
+            sections.push(`<div class="aspect-destinia-diagnostic-section"><strong>Intent:</strong> ${clean_string_for_html(decisionText)}</div>`);
         }
         if (objectiveState.length) {
             const objectiveRows = [];
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${getDiagnosticCheckboxSvg(done)}${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div>`);
+                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-entry"><div class="aspect-destinia-diagnostic-objective-titlebar">${getDiagnosticCheckboxSvg(done)}<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span></div><div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div></div>`);
             });
-            sections.push(`<div><strong>Objectives:</strong></div>${objectiveRows.join('')}`);
+            sections.push(`<div class="aspect-destinia-diagnostic-objectives">${objectiveRows.join('')}</div>`);
         }
         rendered = sections.join('');
     }
