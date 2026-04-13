@@ -790,17 +790,20 @@ We need the specificity to override some theme styles.
 }
 
 #chat .aspect-destinia-diagnostic-objective-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    display: block;
     color: inherit;
     padding: 8px 10px;
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 72%, transparent);
-    border-radius: 10px;
+    border: 1px solid currentColor;
+    border-radius: 0;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 82%, transparent);
 }
 
 #chat .aspect-destinia-diagnostic-objective-inline {
+    color: inherit;
+}
+
+#chat .aspect-destinia-diagnostic-objective-reason {
+    margin: 4px 0 0 10px;
     color: inherit;
 }
 
