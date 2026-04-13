@@ -504,7 +504,10 @@ We need the specificity to override some theme styles.
 #chat .aspect-destinia-diagnostic-box {
     margin-top: 0;
     border-radius: 0 0 12px 12px;
-    border: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
+    border-left: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
+    border-right: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
+    border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
+    border-top: 0;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, rgba(240, 184, 74, 0.12));
     color: var(--SmartThemeBodyColor);
     padding: 10px 12px;
@@ -599,7 +602,6 @@ We need the specificity to override some theme styles.
     justify-content: center;
     min-height: 20px;
     gap: 0;
-    padding-bottom: 10px;
 }
 
 #chat .aspect-destinia-diagnostic-header::after {
@@ -607,8 +609,8 @@ We need the specificity to override some theme styles.
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
-    height: 10px;
+    top: calc(50% + 1px);
+    bottom: -10px;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, rgba(240, 184, 74, 0.12));
 }
 
