@@ -503,7 +503,7 @@ We need the specificity to override some theme styles.
 
 #chat .aspect-destinia-diagnostic-box {
     margin-top: 0;
-    border-radius: 12px;
+    border-radius: 0 0 12px 12px;
     border: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 78%, #f0b84a 22%);
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, rgba(240, 184, 74, 0.12));
     color: var(--SmartThemeBodyColor);
