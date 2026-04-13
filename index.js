@@ -2862,8 +2862,8 @@ function buildDiagnosticDrawerShell(innerHtml = '', isLoading = false) {
 }
 function getDiagnosticCheckboxSvg(isChecked) {
     return isChecked
-        ? '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-checked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 1.6h14c1.88 0 3.4 1.52 3.4 3.4v14c0 1.88-1.52 3.4-3.4 3.4H5c-1.88 0-3.4-1.52-3.4-3.4V5c0-1.88 1.52-3.4 3.4-3.4zm0 2.4c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5zm3.55 8.7 6.6-6.6 1.9 1.9-8.5 8.5-4.2-4.2 1.9-1.9 2.3 2.3z"></path></svg>'
-        : '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-unchecked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 1.6h14c1.88 0 3.4 1.52 3.4 3.4v14c0 1.88-1.52 3.4-3.4 3.4H5c-1.88 0-3.4-1.52-3.4-3.4V5c0-1.88 1.52-3.4 3.4-3.4zm0 2.4c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5z"></path></svg>';
+        ? '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-checked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 1.3h14c2.05 0 3.7 1.65 3.7 3.7v14c0 2.05-1.65 3.7-3.7 3.7H5c-2.05 0-3.7-1.65-3.7-3.7V5c0-2.05 1.65-3.7 3.7-3.7zm0 2.7c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5zm3.3 8.65 6.85-6.85 2.1 2.1-8.95 8.95-4.45-4.45 2.1-2.1 2.35 2.35z"></path></svg>'
+        : '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-unchecked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 1.3h14c2.05 0 3.7 1.65 3.7 3.7v14c0 2.05-1.65 3.7-3.7 3.7H5c-2.05 0-3.7-1.65-3.7-3.7V5c0-2.05 1.65-3.7 3.7-3.7zm0 2.7c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5z"></path></svg>';
 }
 function bindDiagnosticDrawerToggle($drawer) {
     const drawer = $drawer.find('.aspect-destinia-diagnostic-drawer');

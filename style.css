@@ -822,8 +822,8 @@ We need the specificity to override some theme styles.
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg {
     display: inline-block;
-    width: 0.89rem;
-    height: 0.89rem;
+    width: 0.85rem;
+    height: 0.85rem;
     margin-right: 0.28em;
     vertical-align: -0.12em;
     color: currentColor;
