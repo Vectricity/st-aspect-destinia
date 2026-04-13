@@ -599,6 +599,17 @@ We need the specificity to override some theme styles.
     justify-content: center;
     min-height: 20px;
     gap: 0;
+    padding-bottom: 10px;
+}
+
+#chat .aspect-destinia-diagnostic-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 10px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 70%, rgba(240, 184, 74, 0.12));
 }
 
 #chat .aspect-destinia-diagnostic-line {
