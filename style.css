@@ -613,9 +613,8 @@ We need the specificity to override some theme styles.
     position: absolute;
     left: 0;
     right: 0;
-    top: 50%;
+    bottom: 0;
     height: 1px;
-    transform: translateY(-50%);
     background: #4d8cff;
     border-radius: 999px;
 }
