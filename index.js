@@ -2873,18 +2873,31 @@ function bindDiagnosticDrawerToggle($drawer) {
         const collapsed = drawer.attr('data-collapsed') === 'true';
         drawer.attr('data-collapsed', collapsed ? 'false' : 'true');
     });
-    $drawer.find('.aspect-destinia-diagnostic-nav-button').off('click').on('click', function () {
+    $drawer.find('.aspect-destinia-diagnostic-nav-button').off('click').on('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
         const action = String($(this).data('plotAction') || '');
+        const messageIndex = Number($(this).data('messageIndex'));
         if (action === 'first') {
             resetPlotPointToFirst();
-            return;
-        }
-        if (action === 'previous') {
+        } else if (action === 'previous') {
             stepPlotPoint(-1);
-            return;
-        }
-        if (action === 'next') {
+        } else if (action === 'next') {
             stepPlotPoint(1);
+        }
+        const { current } = getCurrentPlotPoint();
+        if (Number.isInteger(messageIndex) && messageIndex >= 0) {
+            const chat = getContext().chat;
+            const message = chat[messageIndex];
+            if (message) {
+                const diagnostic = get_data(message, 'diagnostic') || {};
+                diagnostic.current_plot_title = current?.title || '';
+                set_data(message, 'current_plot_title', current?.title || '');
+                set_data(message, 'diagnostic', diagnostic);
+                update_message_visuals(messageIndex, true);
+                const refreshedDrawer = get_message_div(messageIndex)?.find('.aspect-destinia-diagnostic-drawer');
+                refreshedDrawer?.attr('data-collapsed', 'false');
+            }
         }
     });
 }
@@ -2921,7 +2934,7 @@ function update_message_visuals(i, style=true, text=null) {
     if (!rendered) {
         const sections = [];
         if (currentPlot) {
-            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}<div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="next">Next</button></div></div>`);
+            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}<div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></div>`);
         }
         if (decision) {
             const decisionText = `${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`;
