@@ -803,6 +803,17 @@ We need the specificity to override some theme styles.
     margin-bottom: 8px;
 }
 
+#chat .aspect-destinia-diagnostic-nav {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+#chat .aspect-destinia-diagnostic-nav-button {
+    min-width: 0;
+}
+
 #chat .aspect-destinia-diagnostic-objectives {
     margin-top: 10px;
     display: flex;

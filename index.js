@@ -2873,6 +2873,20 @@ function bindDiagnosticDrawerToggle($drawer) {
         const collapsed = drawer.attr('data-collapsed') === 'true';
         drawer.attr('data-collapsed', collapsed ? 'false' : 'true');
     });
+    $drawer.find('.aspect-destinia-diagnostic-nav-button').off('click').on('click', function () {
+        const action = String($(this).data('plotAction') || '');
+        if (action === 'first') {
+            resetPlotPointToFirst();
+            return;
+        }
+        if (action === 'previous') {
+            stepPlotPoint(-1);
+            return;
+        }
+        if (action === 'next') {
+            stepPlotPoint(1);
+        }
+    });
 }
 function update_message_visuals(i, style=true, text=null) {
     const div_element = get_message_div(i);
@@ -2907,7 +2921,7 @@ function update_message_visuals(i, style=true, text=null) {
     if (!rendered) {
         const sections = [];
         if (currentPlot) {
-            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
+            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}<div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-plot-action="next">Next</button></div></div>`);
         }
         if (decision) {
             const decisionText = `${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`;
