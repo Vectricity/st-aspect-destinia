@@ -787,6 +787,10 @@ We need the specificity to override some theme styles.
     display: flex;
     flex-direction: column;
     gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 72%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(255,255,255,0.03)) 82%, transparent);
 }
 
 #chat .aspect-destinia-diagnostic-objective-item {

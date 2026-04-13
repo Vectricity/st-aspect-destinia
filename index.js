@@ -2914,13 +2914,14 @@ function update_message_visuals(i, style=true, text=null) {
             sections.push(`<div><strong>Intent:</strong> ${clean_string_for_html(decisionText)}</div>`);
         }
         if (objectiveState.length) {
-            sections.push('<div><strong>Objectives:</strong></div>');
+            const objectiveRows = [];
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                sections.push(`<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-inline">${getDiagnosticCheckboxSvg(done)}${clean_string_for_html(label)}</span></div>`);
-                sections.push(`<div>• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div>`);
+                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-inline">${getDiagnosticCheckboxSvg(done)}${clean_string_for_html(label)}</span></div>`);
+                objectiveRows.push(`<div>• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div>`);
             });
+            sections.push(`<div class="aspect-destinia-diagnostic-objectives"><div><strong>Objectives:</strong></div>${objectiveRows.join('')}</div>`);
         }
         rendered = sections.join('');
     }
