@@ -790,9 +790,11 @@ We need the specificity to override some theme styles.
 }
 
 #chat .aspect-destinia-diagnostic-objective-item {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
+    display: block;
+    color: inherit;
+}
+
+#chat .aspect-destinia-diagnostic-objective-inline {
     color: inherit;
 }
 
@@ -820,28 +822,12 @@ We need the specificity to override some theme styles.
 
 #chat .aspect-destinia-diagnostic-objective-icon-svg {
     display: inline-block;
-    width: 1.15rem;
-    height: 1.15rem;
-    vertical-align: text-bottom;
-    flex: 0 0 1.15rem;
-    background-color: currentColor;
-    color: var(--SmartThemeBodyColor);
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    -webkit-mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    mask-size: contain;
-}
-
-#chat .aspect-destinia-diagnostic-objective-icon-svg.is-checked {
-    -webkit-mask-image: url('./icons/checkbox_checked.svg');
-    mask-image: url('./icons/checkbox_checked.svg');
-}
-
-#chat .aspect-destinia-diagnostic-objective-icon-svg.is-unchecked {
-    -webkit-mask-image: url('./icons/checkbox_unchecked.svg');
-    mask-image: url('./icons/checkbox_unchecked.svg');
+    width: 1.05rem;
+    height: 1.05rem;
+    margin-right: 0.28em;
+    vertical-align: -0.12em;
+    color: currentColor;
+    fill: currentColor;
 }
 
 .aspect-destinia-busy-indicator {

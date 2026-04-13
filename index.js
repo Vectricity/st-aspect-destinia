@@ -2860,6 +2860,11 @@ function buildDiagnosticDrawerShell(innerHtml = '', isLoading = false) {
         </div>
     `;
 }
+function getDiagnosticCheckboxSvg(isChecked) {
+    return isChecked
+        ? '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-checked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 2h14c1.66 0 3 1.34 3 3v14c0 1.66-1.34 3-3 3H5c-1.66 0-3-1.34-3-3V5c0-1.66 1.34-3 3-3zm0 2c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5zm4.25 9.25l6.25-6.25 1.5 1.5-7.75 7.75-3.75-3.75 1.5-1.5 2.25 2.25z"></path></svg>'
+        : '<svg class="aspect-destinia-diagnostic-objective-icon-svg is-unchecked" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 2h14c1.66 0 3 1.34 3 3v14c0 1.66-1.34 3-3 3H5c-1.66 0-3-1.34-3-3V5c0-1.66 1.34-3 3-3zm0 2c-.55 0-1 .45-1 1v14c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1H5z"></path></svg>';
+}
 function bindDiagnosticDrawerToggle($drawer) {
     const drawer = $drawer.find('.aspect-destinia-diagnostic-drawer');
     const toggle = $drawer.find('.aspect-destinia-diagnostic-toggle');
@@ -2913,7 +2918,7 @@ function update_message_visuals(i, style=true, text=null) {
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                sections.push(`<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-icon-svg ${done ? 'is-checked' : 'is-unchecked'}" aria-hidden="true"></span><span>${clean_string_for_html(label)}</span></div>`);
+                sections.push(`<div class="aspect-destinia-diagnostic-objective-item"><span class="aspect-destinia-diagnostic-objective-inline">${getDiagnosticCheckboxSvg(done)}${clean_string_for_html(label)}</span></div>`);
                 sections.push(`<div>• <strong>Reason:</strong> ${clean_string_for_html(objectiveReason)}</div>`);
             });
         }
