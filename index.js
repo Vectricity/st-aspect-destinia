@@ -2725,6 +2725,12 @@ function load_profile(profile=null) {
 
     settings = normalizeImportedProfile(settings);
 
+    const selectedPresetId = String(settings.selected_timeline_preset || '').trim();
+    const selectedPreset = settings.timeline_presets?.[selectedPresetId];
+    if (selectedPreset?.timelineText) {
+        settings.timeline_text = String(selectedPreset.timelineText);
+    }
+
     log("Loading Configuration Profile: "+profile);
     Object.assign(extension_settings[MODULE_NAME], settings);
     set_settings('profile', profile);
