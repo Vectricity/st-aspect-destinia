@@ -2467,8 +2467,40 @@ async function clearCurrentChatMessages() {
 }
 async function freshResetExtensionState() {
     const ctx = getContext();
-    const confirmed = await ctx.Popup.show.confirm('Fresh reset extension state for the current chat?', 'This will clear current diagnostics, reset the current plot point to the beginning, clear objective completion state, restore the visible timeline objective booleans for the current chat to false, and restore the visible settings inputs to their current profile values. It will not delete your timeline presets or profile definitions.', { okButton: 'Reset', cancelButton: 'Cancel' });
+    const confirmed = await ctx.Popup.show.confirm('Fresh reset extension state for the current chat?', 'This will clear current diagnostics, reset the current plot point to the beginning, clear objective completion state, restore the visible timeline objective booleans for the current chat to false, and reset non-Timeline JSON inputs to their coded defaults. It will not delete your timeline presets or profile definitions.', { okButton: 'Reset', cancelButton: 'Cancel' });
     if (!confirmed) return;
+
+    const nonTimelineDefaultKeys = [
+        'strictness',
+        'pacing_bias',
+        'objective_auto_advance_threshold',
+        'objective_evaluation_method',
+        'intent_window',
+        'progression_rule',
+        'foreshadow_next_plot_point',
+        'timeline_deviation_allowed',
+        'auto_resolve_deviation',
+        'detach_enabled',
+        'detach_instruction',
+        'guidance_intro',
+        'guidance_principles',
+        'current_plot_point_template',
+        'next_plot_point_template',
+        'transition_template',
+        'objective_guidance_template',
+        'intent_progression_rule',
+        'progression_instruction',
+        'pacing_instruction',
+        'objective_completion_guidance',
+        'foreshadowing_template',
+        'timeline_deviation_instruction',
+        'auto_resolve_deviation_instruction',
+        'guidance_outro',
+        'evaluator_prompt',
+    ];
+    for (const key of nonTimelineDefaultKeys) {
+        set_settings(key, structuredClone(default_settings[key]));
+    }
 
     set_settings('current_plot_index', 0);
     set_settings('last_intent_decision', 'stay');
