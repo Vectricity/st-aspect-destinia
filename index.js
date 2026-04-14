@@ -906,8 +906,13 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
         const integratedObjectiveCompletion = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion.map(Boolean) : [];
-        const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '')) : [];
-        const objectiveResults = objectiveEvaluationMethod === 'per_objective'
+        const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '').trim()) : [];
+        const usePerObjectiveResults = objectiveEvaluationMethod === 'per_objective'
+            || (selected_group && (
+                integratedObjectiveReasons.length !== currentObjectives.length
+                || integratedObjectiveReasons.some(reasonText => !reasonText)
+            ));
+        const objectiveResults = usePerObjectiveResults
             ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives)
             : currentObjectives.map((objective, index) => ({
                 completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
