@@ -560,6 +560,9 @@ function normalizeImportedProfile(data = {}) {
         .replaceAll('Recent user chat:\n{{recentUserChat}}\nRecent chat:\n{{recentChat}}', 'Recent chat selected for evaluation:\n{{recentChat}}')
         .replaceAll('Recent user chat:', 'Recent chat selected for evaluation:')
         .replaceAll('Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.', 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone. Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.');
+    if (!normalized.evaluator_prompt.includes('"objective_reasons"')) {
+        normalized.evaluator_prompt = DEFAULT_EVALUATOR_PROMPT;
+    }
     const timelineResult = getValidatedTimelineText(normalized.timeline_text);
     normalized.timeline_text = timelineResult.timelineText;
     normalized.last_objective_completion = Array.isArray(normalized.last_objective_completion)
