@@ -686,6 +686,13 @@ function getRecentEvaluationContext() {
         recentUserChat,
     };
 }
+function formatEvaluationMessageLine(message) {
+    if (!message) return '';
+    const speaker = message.is_user
+        ? 'User'
+        : (message.name ? `Assistant (${message.name})` : 'Assistant');
+    return `${speaker}: ${message.mes || ''}`;
+}
 function getProgressionRuleInstruction() {
     const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
     const thresholdPercent = Math.round(threshold * 100);
@@ -717,7 +724,7 @@ function buildDestiniaEvaluatorPrompt() {
         '{{objectiveCompletionTriggerThreshold}}': String(Number(get_settings('objective_auto_advance_threshold')) || 0),
         '{{nextTitle}}': next?.title || 'None',
         '{{nextSummary}}': next?.summary || 'None',
-        '{{recentChat}}': recentChat.map(message => `${message?.is_user ? 'User' : 'Assistant'}: ${message?.mes || ''}`).join('\n'),
+        '{{recentChat}}': recentChat.map(formatEvaluationMessageLine).join('\n'),
         '{{objectiveCompletionGuidance}}': get_settings('objective_completion_guidance') || 'Only mark objective completion when the user meaningfully demonstrates progress relevant to the current plot point.',
         '{{progressionRuleInstruction}}': getProgressionRuleInstruction(),
     };
@@ -730,7 +737,7 @@ function buildDestiniaEvaluatorPrompt() {
 async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = []) {
     const { timeline, current } = getCurrentPlotPoint();
     const { recentChat } = getRecentEvaluationContext();
-    const recentChatText = recentChat.map(message => `${message?.is_user ? 'User' : 'Assistant'}: ${message?.mes || ''}`).join('\n');
+    const recentChatText = recentChat.map(formatEvaluationMessageLine).join('\n');
     const guidance = get_settings('objective_completion_guidance') || 'Only mark objective completion when the conversation meaningfully demonstrates progress relevant to the current plot point.';
     const results = [];
 
