@@ -901,7 +901,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
         const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'advance' : 'stay';
         const confidence = Number(parsed?.confidence) || 0;
-        const reason = String(parsed?.reason || '');
+        const reason = '';
         const { current, points, currentIndex } = getCurrentPlotPoint();
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
@@ -911,7 +911,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives)
             : currentObjectives.map((objective, index) => ({
                 completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
-                reason: integratedObjectiveReasons[index] || reason,
+                reason: integratedObjectiveReasons[index] || '',
             }));
         const objectiveCompletion = currentObjectives.map((objective, index) => {
             const persisted = typeof objective?.completed === 'boolean' ? objective.completed : false;
