@@ -596,6 +596,13 @@ function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
         presets[presetId].timelineText = nextTimelineText;
         set_settings('timeline_presets', presets);
     }
+
+    const activeProfile = String(get_settings('profile') || '').trim();
+    const profiles = get_settings('profiles', true) || {};
+    if (activeProfile && profiles[activeProfile]) {
+        profiles[activeProfile].timeline_text = nextTimelineText;
+        set_settings('profiles', profiles);
+    }
 }
 function getCurrentPlotPoint() {
     const timeline = getDestiniaTimeline();
@@ -1294,8 +1301,8 @@ function addInfoTipsToSettings() {
     appendInfoTip(miscTitle, 'debug_mode', 'Explain Miscellaneous Settings');
     const statusTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Status');
     appendInfoTip(statusTitle, 'display_message_state', 'Explain Status');
-    const displayMemoriesLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Display Message State');
-    appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Display Message State');
+    const displayMemoriesLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Diagnostic Messages');
+    appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Diagnostic Messages');
     const autoSummarizeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Refresh Guidance Before Generation');
     appendInfoTip(autoSummarizeLabel, 'refresh_guidance_before_generation', 'Explain Refresh Guidance Before Generation');
     const defaultChatEnabledLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Enable Guidance in New Chats');
