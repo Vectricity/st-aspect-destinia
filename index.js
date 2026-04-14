@@ -146,6 +146,9 @@ Return ONLY valid JSON with these keys:
   "objective_completion": [true, false],
   "objective_reasons": ["short explanation per objective", "short explanation per objective"]
 }
+The `objective_completion` array must have exactly one boolean per current objective, in the same order as `Current objectives`.
+The `objective_reasons` array must have exactly one non-empty explanation per current objective, in the same order as `Current objectives`.
+Do not omit `objective_reasons`, do not shorten either array, and do not provide blank strings.
 Story title: {{storyTitle}}
 Story style: {{storyStyle}}
 Current plot point title: {{currentTitle}}
@@ -905,14 +908,21 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const { current, points, currentIndex } = getCurrentPlotPoint();
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
-        const integratedObjectiveCompletion = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion.map(Boolean) : [];
-        const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '')) : [];
+        const integratedObjectiveCompletionRaw = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion : [];
+        const integratedObjectiveReasonsRaw = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons : [];
+        const integratedObjectiveCompletion = currentObjectives.map((objective, index) => Boolean(integratedObjectiveCompletionRaw[index]));
+        const integratedObjectiveReasons = currentObjectives.map((objective, index) => String(integratedObjectiveReasonsRaw[index] || '').trim());
+        const integratedArraysComplete = integratedObjectiveCompletionRaw.length === currentObjectives.length
+            && integratedObjectiveReasonsRaw.length === currentObjectives.length
+            && integratedObjectiveReasons.every(reasonText => Boolean(reasonText));
         const objectiveResults = objectiveEvaluationMethod === 'per_objective'
             ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives)
-            : currentObjectives.map((objective, index) => ({
-                completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
-                reason: integratedObjectiveReasons[index] || '',
-            }));
+            : integratedArraysComplete
+                ? currentObjectives.map((objective, index) => ({
+                    completed: integratedObjectiveCompletion[index],
+                    reason: integratedObjectiveReasons[index],
+                }))
+                : await evaluateObjectivesWithSuperObjectivePattern(currentObjectives);
         const objectiveCompletion = currentObjectives.map((objective, index) => {
             const persisted = typeof objective?.completed === 'boolean' ? objective.completed : false;
             return Boolean(objectiveResults[index]?.completed ?? persisted);
