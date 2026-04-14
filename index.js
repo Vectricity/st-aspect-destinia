@@ -604,6 +604,42 @@ function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
         set_settings('profiles', profiles);
     }
 }
+function resetTimelineObjectivesToFalse() {
+    const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
+    if (!timelineResult.valid) return;
+    const timeline = timelineResult.timeline;
+
+    if (Array.isArray(timeline.plotPoints)) {
+        timeline.plotPoints = timeline.plotPoints.map((plotPoint) => {
+            if (!Array.isArray(plotPoint?.objectives)) return plotPoint;
+            return {
+                ...plotPoint,
+                objectives: plotPoint.objectives.map((objective) => {
+                    const normalized = normalizeObjectiveItem(objective);
+                    normalized.completed = false;
+                    return normalized;
+                }),
+            };
+        });
+    }
+
+    const nextTimelineText = JSON.stringify(timeline, null, 2);
+    set_settings('timeline_text', nextTimelineText);
+
+    const presetId = String(get_settings('selected_timeline_preset') || '').trim();
+    const presets = get_settings('timeline_presets', true) || {};
+    if (presetId && presets[presetId]) {
+        presets[presetId].timelineText = nextTimelineText;
+        set_settings('timeline_presets', presets);
+    }
+
+    const activeProfile = String(get_settings('profile') || '').trim();
+    const profiles = get_settings('profiles', true) || {};
+    if (activeProfile && profiles[activeProfile]) {
+        profiles[activeProfile].timeline_text = nextTimelineText;
+        set_settings('profiles', profiles);
+    }
+}
 function getCurrentPlotPoint() {
     const timeline = getDestiniaTimeline();
     const points = Array.isArray(timeline.plotPoints) ? timeline.plotPoints : [];
@@ -2523,7 +2559,7 @@ async function freshResetExtensionState() {
     set_settings('last_intent_confidence', 0);
     set_settings('last_intent_reason', '');
     set_settings('last_objective_completion', []);
-    persistObjectiveCompletionToTimeline([]);
+    resetTimelineObjectivesToFalse();
 
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
     for (const message of chat) {
