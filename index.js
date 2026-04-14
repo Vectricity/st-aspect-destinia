@@ -801,20 +801,47 @@ function getGroupEvaluationContext() {
             generationId: null,
         };
     }
-    const assistantBatch = chat.filter(message => !message?.is_user && message?.extra?.gen_id === generationId);
+
+    const assistantBatchIndexes = [];
+    for (let index = 0; index < chat.length; index += 1) {
+        const message = chat[index];
+        if (!message?.is_user && message?.extra?.gen_id === generationId) {
+            assistantBatchIndexes.push(index);
+        }
+    }
+
+    const assistantBatch = assistantBatchIndexes.map(index => chat[index]);
     const targetMessage = assistantBatch[assistantBatch.length - 1] || null;
-    const windowSize = Math.max(1, Number(get_settings('intent_window')) || 8);
-    const recentUserChat = chat.filter(message => message?.is_user).slice(-windowSize);
+    const firstBatchIndex = assistantBatchIndexes[0] ?? -1;
+    const lastBatchIndex = assistantBatchIndexes[assistantBatchIndexes.length - 1] ?? -1;
+
+    let turnStartIndex = 0;
+    if (firstBatchIndex >= 0) {
+        for (let index = firstBatchIndex - 1; index >= 0; index -= 1) {
+            if (chat[index]?.is_user) {
+                turnStartIndex = index;
+                break;
+            }
+        }
+    }
+
+    const turnMessages = firstBatchIndex >= 0 && lastBatchIndex >= firstBatchIndex
+        ? chat.slice(turnStartIndex, lastBatchIndex + 1)
+        : assistantBatch;
+    const recentUserChat = turnMessages.filter(message => message?.is_user);
     const mode = getMessagesEvaluatedMode();
     let recentChat = assistantBatch;
     if (mode === 'user') {
         recentChat = recentUserChat;
     } else if (mode === 'both') {
-        recentChat = [...recentUserChat, ...assistantBatch];
+        recentChat = turnMessages;
     }
     trace_debug('EvaluatorContext', {
         mode,
         generationId,
+        turnStartIndex,
+        firstBatchIndex,
+        lastBatchIndex,
         assistantBatchMessages: assistantBatch.length,
         userMessagesAvailable: recentUserChat.length,
         evaluatedMessages: recentChat.length,
