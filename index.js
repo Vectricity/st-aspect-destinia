@@ -2478,6 +2478,7 @@ async function freshResetExtensionState() {
         'intent_window',
         'progression_rule',
         'foreshadow_next_plot_point',
+        'messages_evaluated',
         'timeline_deviation_allowed',
         'auto_resolve_deviation',
         'detach_enabled',
@@ -2497,6 +2498,14 @@ async function freshResetExtensionState() {
         'auto_resolve_deviation_instruction',
         'guidance_outro',
         'evaluator_prompt',
+        'guidance_position',
+        'guidance_depth',
+        'guidance_role',
+        'guidance_scan',
+        'debug_mode',
+        'display_memories',
+        'default_chat_enabled',
+        'use_global_toggle_state',
     ];
     for (const key of nonTimelineDefaultKeys) {
         set_settings(key, structuredClone(default_settings[key]));
