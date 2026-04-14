@@ -658,6 +658,13 @@ function getMessagesEvaluatedMode() {
     return get_settings('messages_evaluated') || 'both';
 }
 function getRecentEvaluationContext() {
+    if (selected_group) {
+        const { recentChat, recentUserChat } = getGroupEvaluationContext();
+        return {
+            recentChat,
+            recentUserChat,
+        };
+    }
     const recentChatSource = (getContext().chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
     const messagesEvaluated = getMessagesEvaluatedMode();
     let recentChat = recentChatSource;
@@ -764,6 +771,56 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
 }
 let lastEvaluationKey = '';
 let pendingGroupUserEvaluationIndex = null;
+function getLastGroupGenerationId() {
+    const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        const generationId = message?.extra?.gen_id;
+        if (message && !message.is_user && generationId !== undefined && generationId !== null) {
+            return generationId;
+        }
+    }
+    return null;
+}
+function getGroupEvaluationContext() {
+    const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
+    const generationId = getLastGroupGenerationId();
+    if (generationId === null) {
+        return {
+            recentChat: [],
+            recentUserChat: [],
+            assistantBatch: [],
+            targetMessage: null,
+            generationId: null,
+        };
+    }
+    const assistantBatch = chat.filter(message => !message?.is_user && message?.extra?.gen_id === generationId);
+    const targetMessage = assistantBatch[assistantBatch.length - 1] || null;
+    const windowSize = Math.max(1, Number(get_settings('intent_window')) || 8);
+    const recentUserChat = chat.filter(message => message?.is_user).slice(-windowSize);
+    const mode = getMessagesEvaluatedMode();
+    let recentChat = assistantBatch;
+    if (mode === 'user') {
+        recentChat = recentUserChat;
+    } else if (mode === 'both') {
+        recentChat = [...recentUserChat, ...assistantBatch];
+    }
+    trace_debug('EvaluatorContext', {
+        mode,
+        generationId,
+        assistantBatchMessages: assistantBatch.length,
+        userMessagesAvailable: recentUserChat.length,
+        evaluatedMessages: recentChat.length,
+        evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
+    });
+    return {
+        recentChat,
+        recentUserChat,
+        assistantBatch,
+        targetMessage,
+        generationId,
+    };
+}
 async function waitForEvaluationReady() {
     try {
         await waitUntilCondition(() => !streamingProcessor || streamingProcessor.isFinished, 15000, 100);
@@ -790,15 +847,12 @@ function getGroupEvaluationTargetMessage() {
         return null;
     }
 
-    for (let index = chat.length - 1; index >= 0; index -= 1) {
-        if (chat[index] && !chat[index].is_user) return chat[index];
-    }
-
-    return null;
+    const { targetMessage } = getGroupEvaluationContext();
+    return targetMessage;
 }
 function buildEvaluationKey(targetMessage = null) {
     const context = getContext();
-    const recentChat = (context.chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
+    const { recentChat } = getRecentEvaluationContext();
     const evidenceText = recentChat.map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`).join('\n');
     return JSON.stringify({
         mode: getMessagesEvaluatedMode(),
