@@ -657,23 +657,8 @@ function buildDestiniaGuidance() {
 function getMessagesEvaluatedMode() {
     return get_settings('messages_evaluated') || 'both';
 }
-function getRecentEvaluationContext() {
-    const recentChatSource = (getContext().chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
-    const messagesEvaluated = getMessagesEvaluatedMode();
-    let recentChat = recentChatSource;
-    if (messagesEvaluated === 'user') {
-        recentChat = recentChatSource.filter(message => message?.is_user);
-    } else if (messagesEvaluated === 'assistant') {
-        recentChat = recentChatSource.filter(message => !message?.is_user);
-    }
-    const recentUserChat = recentChatSource.filter(message => message?.is_user);
-    trace_debug('EvaluatorContext', {
-        mode: messagesEvaluated,
-        totalRecentMessages: recentChatSource.length,
-        evaluatedMessages: recentChat.length,
-        userMessagesAvailable: recentUserChat.length,
-        evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
-    });
+function getRecentEvaluationContext(turnEndIndex = null) {
+    const { recentChat, recentUserChat } = getEvaluationEvidence(turnEndIndex);
     return {
         recentChat,
         recentUserChat,
@@ -696,10 +681,10 @@ function getProgressionRuleInstruction() {
     }
     return `Active plot progression rule: Intent. ${intentProgressionRule} Mark decision as progress only when the user clearly initiates movement toward the next plot point. Objective completion threshold alone is not enough in this mode.`;
 }
-function buildDestiniaEvaluatorPrompt() {
+function buildDestiniaEvaluatorPrompt(turnEndIndex = null) {
     const { timeline, current, next } = getCurrentPlotPoint();
     if (!current) return '';
-    const { recentChat } = getRecentEvaluationContext();
+    const { recentChat } = getRecentEvaluationContext(turnEndIndex);
     const replace = {
         '{{storyTitle}}': timeline.storyTitle,
         '{{storyStyle}}': timeline.systemStyle,
@@ -720,9 +705,9 @@ function buildDestiniaEvaluatorPrompt() {
     }
     return prompt;
 }
-async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = []) {
+async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [], turnEndIndex = null) {
     const { timeline, current } = getCurrentPlotPoint();
-    const { recentChat } = getRecentEvaluationContext();
+    const { recentChat } = getRecentEvaluationContext(turnEndIndex);
     const recentChatText = recentChat.map(message => `${message?.is_user ? 'User' : 'Assistant'}: ${message?.mes || ''}`).join('\n');
     const guidance = get_settings('objective_completion_guidance') || 'Only mark objective completion when the conversation meaningfully demonstrates progress relevant to the current plot point.';
     const results = [];
@@ -763,7 +748,8 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
     return results;
 }
 let lastEvaluationKey = '';
-let pendingGroupUserEvaluationIndex = null;
+let pendingEvaluationRequest = null;
+let suppressNextGenerationEndedEvaluation = false;
 async function waitForEvaluationReady() {
     try {
         await waitUntilCondition(() => !streamingProcessor || streamingProcessor.isFinished, 15000, 100);
@@ -773,33 +759,86 @@ async function waitForEvaluationReady() {
     }
     return true;
 }
-function getGroupEvaluationTargetMessage() {
-    const context = getContext();
-    const chat = Array.isArray(context.chat) ? context.chat : [];
-    if (!chat.length) return null;
+function getTurnStartIndex(turnEndIndex = null) {
+    const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
+    if (!chat.length) return 0;
+    const endIndex = typeof turnEndIndex === 'number' ? Math.max(0, Math.min(turnEndIndex, chat.length - 1)) : chat.length - 1;
+    let startIndex = 0;
+    for (let index = endIndex; index >= 0; index -= 1) {
+        if (chat[index]?.is_user) {
+            startIndex = index;
+            break;
+        }
+    }
+    return startIndex;
+}
+function getTurnEvidenceWindow(turnEndIndex = null) {
+    const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
+    if (!chat.length) {
+        return { turnMessages: [], targetMessage: null, turnStartIndex: -1, turnEndIndex: -1 };
+    }
+    const endIndex = typeof turnEndIndex === 'number' ? Math.max(0, Math.min(turnEndIndex, chat.length - 1)) : chat.length - 1;
+    const startIndex = getTurnStartIndex(endIndex);
+    const turnMessages = chat.slice(startIndex, endIndex + 1);
     const mode = getMessagesEvaluatedMode();
+    let targetMessage = null;
 
     if (mode === 'user') {
-        const pendingIndex = Number(pendingGroupUserEvaluationIndex);
-        if (Number.isInteger(pendingIndex) && pendingIndex >= 0 && chat[pendingIndex]?.is_user) {
-            return chat[pendingIndex];
+        targetMessage = turnMessages.find(message => message?.is_user) || chat[startIndex] || null;
+    } else {
+        for (let index = turnMessages.length - 1; index >= 0; index -= 1) {
+            if (turnMessages[index] && !turnMessages[index].is_user) {
+                targetMessage = turnMessages[index];
+                break;
+            }
         }
-        for (let index = chat.length - 1; index >= 0; index -= 1) {
-            if (chat[index]?.is_user) return chat[index];
-        }
-        return null;
     }
 
-    for (let index = chat.length - 1; index >= 0; index -= 1) {
-        if (chat[index] && !chat[index].is_user) return chat[index];
+    if (!targetMessage) {
+        targetMessage = chat[endIndex] || null;
     }
 
-    return null;
+    return {
+        turnMessages,
+        targetMessage,
+        turnStartIndex: startIndex,
+        turnEndIndex: endIndex,
+    };
 }
-function buildEvaluationKey(targetMessage = null) {
+function getEvaluationEvidence(turnEndIndex = null) {
+    const { turnMessages, targetMessage, turnStartIndex, turnEndIndex } = getTurnEvidenceWindow(turnEndIndex);
+    const mode = getMessagesEvaluatedMode();
+    let recentChat = turnMessages;
+
+    if (mode === 'user') {
+        recentChat = turnMessages.filter(message => message?.is_user);
+    } else if (mode === 'assistant') {
+        recentChat = turnMessages.filter(message => !message?.is_user);
+    }
+
+    const recentUserChat = turnMessages.filter(message => message?.is_user);
+    trace_debug('EvaluatorContext', {
+        mode,
+        turnStartIndex,
+        turnEndIndex,
+        turnMessages: turnMessages.length,
+        evaluatedMessages: recentChat.length,
+        userMessagesAvailable: recentUserChat.length,
+        evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
+    });
+
+    return {
+        recentChat,
+        recentUserChat,
+        targetMessage,
+        turnStartIndex,
+        turnEndIndex,
+    };
+}
+function buildEvaluationKey(targetMessage = null, recentChat = null) {
     const context = getContext();
-    const recentChat = (context.chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
-    const evidenceText = recentChat.map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`).join('\n');
+    const evidenceMessages = Array.isArray(recentChat) ? recentChat : [];
+    const evidenceText = evidenceMessages.map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`).join('\n');
     return JSON.stringify({
         mode: getMessagesEvaluatedMode(),
         progressionRule: get_settings('progression_rule'),
@@ -810,16 +849,17 @@ function buildEvaluationKey(targetMessage = null) {
         evidenceHash: getStringHash(evidenceText),
     });
 }
-async function evaluateDestiniaProgress(targetMessage = null) {
+async function evaluateDestiniaProgress(targetMessage = null, turnEndIndex = null) {
     if (!chat_enabled() || !get_settings('dest_enabled')) return null;
     if (!(await waitForEvaluationReady())) return null;
-    const resolvedTargetMessage = targetMessage || getGroupEvaluationTargetMessage();
-    const evaluationKey = buildEvaluationKey(resolvedTargetMessage);
+    const evidence = getEvaluationEvidence(turnEndIndex);
+    const resolvedTargetMessage = targetMessage || evidence.targetMessage;
+    const evaluationKey = buildEvaluationKey(resolvedTargetMessage, evidence.recentChat);
     if (evaluationKey === lastEvaluationKey) {
         debug('Skipping duplicate Destinia evaluation for unchanged evidence');
         return null;
     }
-    const prompt = buildDestiniaEvaluatorPrompt();
+    const prompt = buildDestiniaEvaluatorPrompt(evidence.turnEndIndex);
     if (!prompt) return null;
     const evaluatorPreset = get_settings('evaluator_preset');
     const evaluatorProfile = get_settings('evaluator_connection_profile');
@@ -854,7 +894,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const integratedObjectiveCompletion = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion.map(Boolean) : [];
         const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '')) : [];
         const objectiveResults = objectiveEvaluationMethod === 'per_objective'
-            ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives)
+            ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives, evidence.turnEndIndex)
             : currentObjectives.map((objective, index) => ({
                 completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
                 reason: integratedObjectiveReasons[index] || reason,
@@ -906,7 +946,8 @@ async function evaluateDestiniaProgress(targetMessage = null) {
     } finally {
         active_diagnostic_loading_index = null;
         active_diagnostic_loading_started_at = 0;
-        pendingGroupUserEvaluationIndex = null;
+        pendingEvaluationRequest = null;
+        suppressNextGenerationEndedEvaluation = false;
         update_all_message_visuals();
         setTimeout(() => {
             finishing_diagnostic_index = null;
@@ -3157,13 +3198,19 @@ async function on_chat_event(event=null, data=null) {
             last_message_swiped = null;
             last_message = null;
             if (!chat_enabled()) break;
-            if (selected_group && getMessagesEvaluatedMode() === 'user') {
-                pendingGroupUserEvaluationIndex = typeof index === 'number' ? index : context.chat.length - 1;
+            pendingEvaluationRequest = {
+                mode: getMessagesEvaluatedMode(),
+                turnEndIndex: typeof index === 'number' ? index : context.chat.length - 1,
+                targetMessage: context.chat?.[typeof index === 'number' ? index : context.chat.length - 1] || context.chat?.[context.chat.length - 1] || null,
+                source: 'user_message',
+            };
+            if (selected_group) {
+                suppressNextGenerationEndedEvaluation = true;
                 break;
             }
             if (getMessagesEvaluatedMode() === 'user') {
-                const userMessage = context.chat?.[typeof index === 'number' ? index : context.chat.length - 1] || context.chat?.[context.chat.length - 1] || null;
-                await evaluateDestiniaProgress(userMessage);
+                const userMessage = pendingEvaluationRequest.targetMessage;
+                await evaluateDestiniaProgress(userMessage, pendingEvaluationRequest.turnEndIndex);
             }
             refresh_guidance();
             break;
@@ -3174,11 +3221,18 @@ async function on_chat_event(event=null, data=null) {
             if (streamingProcessor && !streamingProcessor.isFinished) break;
             last_message_swiped = null;
             last_message = index;
-            if (!selected_group) {
+            if (selected_group) {
+                pendingEvaluationRequest = {
+                    mode: getMessagesEvaluatedMode(),
+                    turnEndIndex: typeof index === 'number' ? index : context.chat.length - 1,
+                    targetMessage: context.chat?.[typeof index === 'number' ? index : context.chat.length - 1] || context.chat?.[context.chat.length - 1] || null,
+                    source: 'char_message',
+                };
+            } else {
                 const mode = getMessagesEvaluatedMode();
                 if (mode === 'assistant' || mode === 'both') {
                     const assistantMessage = context.chat?.[index] || null;
-                    await evaluateDestiniaProgress(assistantMessage);
+                    await evaluateDestiniaProgress(assistantMessage, typeof index === 'number' ? index : context.chat.length - 1);
                 }
             }
             refresh_guidance();
@@ -3440,13 +3494,29 @@ jQuery(async function () {
     eventSource.on(event_types.USER_MESSAGE_RENDERED, (id) => on_chat_event('user_message', id));
     eventSource.on(event_types.GROUP_WRAPPER_FINISHED, () => {
         if (!chat_enabled()) return;
-        const mode = getMessagesEvaluatedMode();
-        if (mode === 'assistant' || mode === 'both') {
-            evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
-        } else if (mode === 'user' && pendingGroupUserEvaluationIndex !== null) {
-            evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
+        if (!selected_group) return;
+        const request = pendingEvaluationRequest;
+        if (request) {
+            evaluateDestiniaProgress(request.mode === 'user' ? request.targetMessage : null, request.turnEndIndex);
         }
         refresh_guidance();
+    });
+    eventSource.on(event_types.GENERATION_ENDED, (chatLength) => {
+        if (!chat_enabled()) return;
+        if (selected_group) {
+            suppressNextGenerationEndedEvaluation = false;
+            return;
+        }
+        if (suppressNextGenerationEndedEvaluation) {
+            suppressNextGenerationEndedEvaluation = false;
+            return;
+        }
+        const request = pendingEvaluationRequest;
+        if (!request) return;
+        const turnEndIndex = typeof chatLength === 'number' ? Math.max(0, chatLength - 1) : request.turnEndIndex;
+        if (request.mode === 'assistant' || request.mode === 'both') {
+            evaluateDestiniaProgress(null, turnEndIndex);
+        }
     });
     eventSource.on(event_types.MESSAGE_DELETED, (id) => on_chat_event('message_deleted', id));
     eventSource.on(event_types.MESSAGE_EDITED, (id) => on_chat_event('message_edited', id));
