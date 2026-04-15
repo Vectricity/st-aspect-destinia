@@ -1,6 +1,6 @@
 {
     "display_name": "Aspect: Destinia",
-    "loading_order": 35,
+    "loading_order": 1,
     "requires": [],
     "optional": [],
     "minimum_client_version": "1.13.2",
