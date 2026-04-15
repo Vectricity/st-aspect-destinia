@@ -2768,6 +2768,12 @@ function load_profile(profile=null) {
 
     settings = normalizeImportedProfile(settings);
 
+    let profiles = get_settings('profiles', true) || {};
+    if (profiles[profile]) {
+        profiles[profile] = structuredClone(settings);
+        set_settings('profiles', profiles);
+    }
+
     log("Loading Configuration Profile: "+profile);
     Object.assign(extension_settings[MODULE_NAME], settings);
     set_settings('profile', profile);
