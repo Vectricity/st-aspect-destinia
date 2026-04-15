@@ -1341,10 +1341,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Diagnostic Messages');
     const autoSummarizeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Refresh Guidance Before Generation');
     appendInfoTip(autoSummarizeLabel, 'refresh_guidance_before_generation', 'Explain Refresh Guidance Before Generation');
-    const defaultChatEnabledLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Enable Guidance in New Chats');
-    appendInfoTip(defaultChatEnabledLabel, 'enable_guidance_in_new_chats', 'Explain Enable Guidance in New Chats');
-    const globalToggleLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Use Global Toggle State');
-    appendInfoTip(globalToggleLabel, 'use_global_toggle_state', 'Explain Use Global Toggle State');
     const notifyOnSwitchLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Notify on Switch');
     appendInfoTip(notifyOnSwitchLabel, 'notify_on_switch', 'Explain Notify on Switch');
     const debugModeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Debug Mode');
@@ -2547,8 +2543,6 @@ async function freshResetExtensionState() {
         'guidance_scan',
         'debug_mode',
         'display_memories',
-        'default_chat_enabled',
-        'use_global_toggle_state',
     ];
     for (const key of nonTimelineDefaultKeys) {
         set_settings(key, structuredClone(default_settings[key]));
@@ -3493,8 +3487,6 @@ function initialize_settings_listeners() {
 
     bind_setting('#debug_mode', 'debug_mode', 'boolean');
     bind_setting('#display_memories', 'display_memories', 'boolean');
-    bind_setting('#default_chat_enabled', 'default_chat_enabled', 'boolean');
-    bind_setting('#use_global_toggle_state', 'use_global_toggle_state', 'boolean');
 
     refresh_settings();
 }
