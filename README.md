@@ -118,3 +118,5 @@ The extension is meant for people who want better continuity in long chats. It k
   ]
 }
 ```
+
+Please consider stopping by my [Ko-Fi](https://ko-fi.com/genisai) page to offer a little support for a job well done. 
