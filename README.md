@@ -119,6 +119,8 @@ The extension is meant for people who want better continuity in long chats. It k
 }
 ```
 
-Please consider stopping by my [Ko-Fi](https://ko-fi.com/genisai) page to offer a little support for a job well done. 
+Please consider tipping a job well done. 
 
-[![ko-fi-thumbnail-genisai.png](https://i.postimg.cc/nhQNnP6S/ko-fi-thumbnail-genisai.png)]([https://postimg.cc/v4b0z385](https://ko-fi.com/genisai))
+<a href="https://ko-fi.com/genisai">
+  <img src="https://github.com/Vectricity/st-aspect-destinia/raw/assets/assets/ko-fi_thumbnail_genisai.png" alt="Support Genisai on Ko-fi" width="400">
+</a>
