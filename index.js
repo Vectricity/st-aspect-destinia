@@ -1821,12 +1821,17 @@ async function get_evaluator_preset_max_tokens() {
 }
 
 // Connection profiles
-let connection_profiles_active;
+let connection_profiles_active = false;
 function check_connection_profiles_active() {
-    // detect whether the connection profiles extension is active by checking for the UI elements
-    if (connection_profiles_active === undefined) {
-        connection_profiles_active = $('#sys-settings-button').find('#connection_profiles').length > 0
+    if (connection_profiles_active) {
+        return true;
     }
+    const selectors = [
+        '#connection_profiles',
+        'select#connection_profiles',
+        '[name="connection_profiles"]',
+    ];
+    connection_profiles_active = selectors.some((selector) => $(selector).length > 0);
     return connection_profiles_active;
 }
 async function get_current_connection_profile() {
@@ -1916,15 +1921,23 @@ async function verify_connection_profile(name) {
     let names = await get_connection_profiles()
     return names.includes(name)
 }
-async function check_connection_profile_valid()  {
-    // check whether the current evaluator connection profile is valid
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    let evaluator_connection = get_settings('evaluator_connection_profile')
-    let valid = await verify_connection_profile(evaluator_connection)
-    if (!valid) {
-        toast_debounced(`Your selected evaluator connection profile "${evaluator_connection}" is not valid.`, "warning")
+async function check_connection_profile_valid() {
+    if (!check_connection_profiles_active()) {
+        return false;
     }
-    return valid
+    const $select = $(`.${settings_content_class} #evaluator_connection_profile`);
+    const currentValue = String(get_settings('evaluator_connection_profile') || '').trim();
+    if (!currentValue) {
+        return true;
+    }
+    const hasOption = $select.find(`option[value="${CSS.escape(currentValue)}"]`).length > 0;
+    if (!hasOption) {
+        debug(`Stored evaluator connection profile "${currentValue}" is no longer available.`);
+        set_settings('evaluator_connection_profile', '');
+        $select.val('');
+        return false;
+    }
+    return true;
 }
 
 
@@ -2316,20 +2329,22 @@ async function update_preset_dropdown() {
     $preset_select.off('click').on('click', () => update_preset_dropdown());
 }
 async function update_connection_profile_dropdown() {
-    let $connection_select = $(`.${settings_content_class} #evaluator_connection_profile`);
-    if ($connection_select.length === 0) return;
-    const connectionElement = $connection_select.get(0);
-    const selectedConnection = get_settings('evaluator_connection_profile');
-    const connection_options = await get_connection_profiles();
-    if (document.activeElement !== connectionElement) {
-        $connection_select.empty();
-        $connection_select.append(`<option value="">${t`Same as Current`}</option>`);
-        for (let option of connection_options) {
-            $connection_select.append(`<option value="${option}">${option}</option>`);
-        }
-        $connection_select.val(selectedConnection);
+    const $destSelect = $(`.${settings_content_class} #evaluator_connection_profile`);
+    const $sourceSelect = $('#connection_profiles');
+    $destSelect.empty();
+    if (!$sourceSelect.length) {
+        debug('No #connection_profiles source select found while updating evaluator connection profile dropdown.');
+        return;
     }
-    $connection_select.off('click').on('click', () => update_connection_profile_dropdown());
+    $sourceSelect.find('option').each(function () {
+        const value = $(this).attr('value') ?? '';
+        const text = $(this).text() ?? '';
+        $destSelect.append(
+            $('<option></option>').val(value).text(text)
+        );
+    });
+    const selectedValue = get_settings('evaluator_connection_profile') || '';
+    $destSelect.val(selectedValue);
 }
 function updateTimelinePresetDropdown() {
     const $presetSelect = $(`.${settings_content_class} #timeline_preset`);
@@ -2584,13 +2599,24 @@ function refresh_settings() {
     debug("Refreshing settings...")
 
     // connection profiles
+    const $evaluatorConnectionSelect = $(`.${settings_content_class} #evaluator_connection_profile`);
+    const $evaluatorConnectionField = $evaluatorConnectionSelect.closest('.aspect-destinia-field');
+    
+    $evaluatorConnectionField.show();
+    
     if (check_connection_profiles_active()) {
-        update_connection_profile_dropdown()
-        check_connection_profile_valid()
-        $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field').show();
-    } else { // if connection profiles extension isn't active, hide the connection profile dropdown
-        $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field').hide();
-        debug("Connection profiles extension not active. Hiding evaluator connection profile dropdown.")
+        update_connection_profile_dropdown();
+        check_connection_profile_valid();
+        $evaluatorConnectionSelect.prop('disabled', false);
+    } else {
+        $evaluatorConnectionSelect.empty();
+        $evaluatorConnectionSelect.append(
+            $('<option></option>')
+                .val('')
+                .text('Connection Profiles UI not detected')
+        );
+        $evaluatorConnectionSelect.prop('disabled', true);
+        debug('Connection Profiles control not detected. Leaving evaluator connection profile visible but disabled.');
     }
 
     // completion presets
