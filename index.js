@@ -276,7 +276,6 @@ const default_settings = {
     evaluator_connection_profile: '',
     evaluator_preset: '',
     current_plot_index: 0,
-    last_intent_reason: '',
     evaluator_prompt: DEFAULT_EVALUATOR_PROMPT,
 
     // misc
@@ -970,7 +969,6 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
         const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'advance' : 'stay';
         const confidence = Number(parsed?.confidence) || 0;
-        const reason = '';
         const { current, points, currentIndex } = getCurrentPlotPoint();
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
@@ -986,13 +984,9 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             const persisted = typeof objective?.completed === 'boolean' ? objective.completed : false;
             return Boolean(objectiveResults[index]?.completed ?? persisted);
         });
-        set_settings('last_intent_reason', reason);
         persistObjectiveCompletionToTimeline(objectiveCompletion);
         const diagnostic = {
             current_plot_title: current?.title || '',
-            decision,
-            confidence,
-            reason,
             objective_completion: objectiveCompletion,
             objectives: currentObjectives.map((objective) => typeof objective === 'string' ? objective : objective?.text || ''),
             objective_reasons: objectiveResults.map((result) => String(result?.reason || '')),
@@ -1004,15 +998,12 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         }
         if (resolvedTargetMessage) {
             const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
-            set_data(resolvedTargetMessage, 'last_intent_reason', reason);
             set_data(resolvedTargetMessage, 'current_plot_title', current?.title || '');
             set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
             finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
             trace_debug('EvaluateDestiniaProgress:attached', {
                 targetIsUser: Boolean(resolvedTargetMessage?.is_user),
                 targetName: resolvedTargetMessage?.name || '',
-                decision,
-                confidence,
                 objectiveCompletion,
             });
         }
@@ -2545,14 +2536,12 @@ async function freshResetExtensionState() {
     }
 
     set_settings('current_plot_index', 0);
-    set_settings('last_intent_reason', '');
     resetTimelineObjectivesToFalse();
 
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
     for (const message of chat) {
         if (message?.extra?.[MODULE_NAME]) {
             delete message.extra[MODULE_NAME].diagnostic;
-            delete message.extra[MODULE_NAME].last_intent_reason;
             delete message.extra[MODULE_NAME].current_plot_title;
             if (!Object.keys(message.extra[MODULE_NAME]).length) {
                 delete message.extra[MODULE_NAME];
@@ -3112,9 +3101,6 @@ function update_message_visuals(i, style=true, text=null) {
     const message = chat[i];
     const diagnostic = get_data(message, 'diagnostic') || null;
     const currentPlot = diagnostic?.current_plot_title || get_data(message, 'current_plot_title') || '';
-    const decision = diagnostic?.decision || '';
-    const reason = diagnostic?.reason || get_data(message, 'last_intent_reason') || '';
-    const confidence = diagnostic?.confidence;
     const objectiveState = Array.isArray(diagnostic?.objective_completion) ? diagnostic.objective_completion : [];
     const objectiveLabels = Array.isArray(diagnostic?.objectives) ? diagnostic.objectives : [];
     const objectiveReasons = Array.isArray(diagnostic?.objective_reasons) ? diagnostic.objective_reasons : [];
@@ -3124,7 +3110,7 @@ function update_message_visuals(i, style=true, text=null) {
         ? Math.max(0, Math.min(100, ((Date.now() - active_diagnostic_loading_started_at) / 12000) * 100))
         : 0;
 
-    if (!currentPlot && !decision && !reason && !objectiveState.length && !text && !isLoadingDiagnostic) {
+    if (!currentPlot && !objectiveState.length && !text && !isLoadingDiagnostic) {
         return;
     }
 
@@ -3134,10 +3120,6 @@ function update_message_visuals(i, style=true, text=null) {
         const sections = [];
         if (currentPlot) {
             sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}<div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></div>`);
-        }
-        if (decision) {
-            const decisionText = `${decision === 'advance' ? 'Progress' : 'Stagnate'}${typeof confidence === 'number' ? ` (${Math.round(confidence * 100)}%)` : ''}`;
-            sections.push(`<div class="aspect-destinia-diagnostic-section"><strong>Intent:</strong> ${clean_string_for_html(decisionText)}</div>`);
         }
         if (objectiveState.length) {
             const objectiveRows = [];
