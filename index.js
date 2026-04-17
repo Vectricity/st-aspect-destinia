@@ -276,8 +276,6 @@ const default_settings = {
     evaluator_connection_profile: '',
     evaluator_preset: '',
     current_plot_index: 0,
-    last_intent_decision: 'stay',
-    last_intent_confidence: 0,
     last_intent_reason: '',
     evaluator_prompt: DEFAULT_EVALUATOR_PROMPT,
 
@@ -988,8 +986,6 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             const persisted = typeof objective?.completed === 'boolean' ? objective.completed : false;
             return Boolean(objectiveResults[index]?.completed ?? persisted);
         });
-        set_settings('last_intent_decision', decision);
-        set_settings('last_intent_confidence', confidence);
         set_settings('last_intent_reason', reason);
         persistObjectiveCompletionToTimeline(objectiveCompletion);
         const diagnostic = {
@@ -1008,7 +1004,6 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         }
         if (resolvedTargetMessage) {
             const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
-            set_data(resolvedTargetMessage, 'last_intent_decision', decision);
             set_data(resolvedTargetMessage, 'last_intent_reason', reason);
             set_data(resolvedTargetMessage, 'current_plot_title', current?.title || '');
             set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
@@ -1577,14 +1572,7 @@ function addFieldResetButtons() {
     }
 }
 function get_plot_progression_status() {
-    const reason = String(get_settings('last_intent_reason') || '');
-    if (reason.startsWith('Advanced after ')) {
-        return 'Next Plot Point';
-    }
-    if (get_settings('last_intent_decision') === 'advance') {
-        return 'Transition';
-    }
-    return 'Stagnate';
+    return 'Index-Based';
 }
 function render_status_panel() {
     const statusRoot = document.getElementById('aspect_destinia_status');
@@ -1616,7 +1604,7 @@ function render_status_panel() {
             </div>
             <div class="aspect-destinia-stat">
                 <div class="aspect-destinia-stat-label">Plot Progression Evaluation</div>
-                <div class="aspect-destinia-stat-value">${clean_string_for_html(format_percent(get_settings('last_intent_confidence')))}</div>
+                <div class="aspect-destinia-stat-value">Per-pass diagnostics only</div>
             </div>
         </div>
         <div class="aspect-destinia-objective-list">
@@ -2557,8 +2545,6 @@ async function freshResetExtensionState() {
     }
 
     set_settings('current_plot_index', 0);
-    set_settings('last_intent_decision', 'stay');
-    set_settings('last_intent_confidence', 0);
     set_settings('last_intent_reason', '');
     resetTimelineObjectivesToFalse();
 
@@ -2566,7 +2552,6 @@ async function freshResetExtensionState() {
     for (const message of chat) {
         if (message?.extra?.[MODULE_NAME]) {
             delete message.extra[MODULE_NAME].diagnostic;
-            delete message.extra[MODULE_NAME].last_intent_decision;
             delete message.extra[MODULE_NAME].last_intent_reason;
             delete message.extra[MODULE_NAME].current_plot_title;
             if (!Object.keys(message.extra[MODULE_NAME]).length) {
@@ -3127,7 +3112,7 @@ function update_message_visuals(i, style=true, text=null) {
     const message = chat[i];
     const diagnostic = get_data(message, 'diagnostic') || null;
     const currentPlot = diagnostic?.current_plot_title || get_data(message, 'current_plot_title') || '';
-    const decision = diagnostic?.decision || get_data(message, 'last_intent_decision') || '';
+    const decision = diagnostic?.decision || '';
     const reason = diagnostic?.reason || get_data(message, 'last_intent_reason') || '';
     const confidence = diagnostic?.confidence;
     const objectiveState = Array.isArray(diagnostic?.objective_completion) ? diagnostic.objective_completion : [];
