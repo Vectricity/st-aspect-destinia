@@ -2311,6 +2311,14 @@ async function update_preset_dropdown() {
     }
     $preset_select.off('click').on('click', () => update_preset_dropdown());
 }
+function get_saved_evaluator_connection_profile_id() {
+    const context = getContext();
+    const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+    const savedName = String(get_settings('evaluator_connection_profile') || '');
+    if (!savedName) return '';
+    const profile = profiles.find((item) => item?.name === savedName);
+    return profile?.id || '';
+}
 function initialize_connection_profile_dropdown() {
     const selector = `.${settings_content_class} #evaluator_connection_profile`;
     const context = getContext();
@@ -2321,11 +2329,12 @@ function initialize_connection_profile_dropdown() {
     if (!$connectionSelect.length) return false;
 
     if ($connectionSelect.data('aspectDestiniaCmBound') === true) {
+        $connectionSelect.val(get_saved_evaluator_connection_profile_id());
         return true;
     }
 
-    requestService.handleDropdown(selector, get_settings('evaluator_connection_profile'), (profile) => {
-        set_settings('evaluator_connection_profile', profile?.id || '');
+    requestService.handleDropdown(selector, get_saved_evaluator_connection_profile_id(), (profile) => {
+        set_settings('evaluator_connection_profile', profile?.name || '');
     });
     $connectionSelect.data('aspectDestiniaCmBound', true);
     return true;
