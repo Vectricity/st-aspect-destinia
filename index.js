@@ -1822,10 +1822,20 @@ async function get_evaluator_preset_max_tokens() {
 
 // Connection profiles
 let connection_profiles_active;
+async function detect_connection_profiles_active() {
+    try {
+        let ctx = getContext();
+        let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`);
+        const parsed = JSON.parse(result?.pipe || '[]');
+        connection_profiles_active = Array.isArray(parsed);
+    } catch {
+        connection_profiles_active = false;
+    }
+    return connection_profiles_active;
+}
 function check_connection_profiles_active() {
-    // detect whether the connection profiles extension is active by checking for the UI elements
     if (connection_profiles_active === undefined) {
-        connection_profiles_active = $('#sys-settings-button').find('#connection_profiles').length > 0
+        return false;
     }
     return connection_profiles_active;
 }
@@ -2591,6 +2601,16 @@ function refresh_settings() {
     } else { // if connection profiles extension isn't active, hide the connection profile dropdown
         $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field').hide();
         debug("Connection profiles extension not active. Hiding evaluator connection profile dropdown.")
+        detect_connection_profiles_active().then((active) => {
+            const connectionField = $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field');
+            if (active) {
+                connectionField.show();
+                update_connection_profile_dropdown();
+                check_connection_profile_valid();
+            } else {
+                connectionField.hide();
+            }
+        });
     }
 
     // completion presets
