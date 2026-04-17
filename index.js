@@ -1,11 +1,8 @@
 import {
     getStringHash,
     debounce,
-    copyText,
-    trimToEndSentence,
     download,
     parseJsonFile,
-    stringToRange,
     waitUntilCondition
 } from '../../../utils.js';
 import {
@@ -27,10 +24,7 @@ import { getContext, extension_settings, saveMetadataDebounced} from '../../../e
 import { getPresetManager } from '../../../preset-manager.js'
 import { formatInstructModeChat } from '../../../instruct-mode.js';
 import { selected_group } from '../../../group-chats.js';
-import { loadMovingUIState } from '../../../power-user.js';
-import { dragElement } from '../../../RossAscends-mods.js';
 import { debounce_timeout } from '../../../constants.js';
-import { getRegexScripts } from '../../../../scripts/extensions/regex/index.js'
 import { t, translate } from '../../../i18n.js';
 
 export { MODULE_NAME };
@@ -68,7 +62,6 @@ const LABEL_HELP = Object.freeze({
     plot_alignment_strictness: 'How tightly guidance should adhere to the current plot point.',
     plot_progression_aggressiveness: 'How strongly guidance should push toward progression when allowed.',
     plot_foreshadowing: 'Whether guidance may seed the next plot point before full progression.',
-    plot_stagnation: 'Whether clear conversational support for remaining on the current plot point should be honored.',
     injected_guidance_fields: 'Editable text templates and instructions used to build the injected guidance and evaluator behavior.',
     injection_intro: 'Editable text template used as the opening instruction block for injected Destinia guidance.',
     guidance_principles: 'Editable principles that define how Destinia should balance plot guidance, immersion, and user agency.',
@@ -90,7 +83,6 @@ const LABEL_HELP = Object.freeze({
     fresh_reset_extension: 'Reset current-chat Destinia state for fresh testing without deleting profiles or presets.',
     download_debug_log: 'Export the in-memory debug trace collected while `Debug Mode` is enabled.',
     display_message_state: 'Show per-message diagnostic/state surfaces in chat.',
-    refresh_guidance_before_generation: 'Whether Destinia should explicitly rebuild and re-register its guidance on the pre-generation event, so the latest current plot state and settings are injected right before the LLM generates a response.',
     enable_guidance_in_new_chats: 'Default enabled state for new chats.',
     use_global_toggle_state: 'Use one shared enabled/disabled toggle state instead of per-chat state.',
     notify_on_switch: 'Show a toast when profiles switch.',
@@ -255,7 +247,6 @@ const default_settings = {
     // Destinia guidance settings
     dest_enabled: true,
     timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
-    advancement_mode: 'objectives',
     progression_rule: 'objective_completion',
     foreshadow_next_plot_point: true,
     messages_evaluated: 'both',
@@ -285,7 +276,6 @@ const default_settings = {
     evaluator_connection_profile: '',
     evaluator_preset: '',
     current_plot_index: 0,
-    pending_evaluation_target: null,
     last_intent_decision: 'stay',
     last_intent_confidence: 0,
     last_intent_reason: '',
@@ -1339,8 +1329,6 @@ function addInfoTipsToSettings() {
     appendInfoTip(statusTitle, 'display_message_state', 'Explain Status');
     const displayMemoriesLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Diagnostic Messages');
     appendInfoTip(displayMemoriesLabel, 'display_message_state', 'Explain Diagnostic Messages');
-    const autoSummarizeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Refresh Guidance Before Generation');
-    appendInfoTip(autoSummarizeLabel, 'refresh_guidance_before_generation', 'Explain Refresh Guidance Before Generation');
     const notifyOnSwitchLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Notify on Switch');
     appendInfoTip(notifyOnSwitchLabel, 'notify_on_switch', 'Explain Notify on Switch');
     const debugModeLabel = Array.from(root.querySelectorAll('.checkbox_label > span')).find((element) => element.textContent.trim() === 'Debug Mode');
@@ -1708,15 +1696,6 @@ function regex(string, re) {
     let matches = [...string.matchAll(re)];
     return matches.flatMap(m => m.slice(1).filter(Boolean));
 }
-function get_regex_script(name) {
-    const scripts = getRegexScripts();
-    for (let script of scripts) {
-        if (script.scriptName === name) {
-            return script
-        }
-    }
-    debug(`No regex script found: "${name}"`)
-}
 function add_i18n($element=null) {
     // dynamically translate config settings
     log("Translating with i18n...")
@@ -1822,22 +1801,26 @@ async function get_evaluator_preset_max_tokens() {
 
 // Connection profiles
 let connection_profiles_active;
+let connection_profiles_ready = false;
 async function detect_connection_profiles_active() {
     try {
         let ctx = getContext();
         let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`);
         const parsed = JSON.parse(String(result?.pipe || '[]'));
         connection_profiles_active = Array.isArray(parsed);
+        connection_profiles_ready = true;
     } catch {
-        connection_profiles_active = false;
+        if (connection_profiles_ready !== true) {
+            connection_profiles_active = false;
+        }
     }
     return connection_profiles_active;
 }
 function check_connection_profiles_active() {
-    if (connection_profiles_active === undefined) {
+    if (connection_profiles_ready !== true) {
         return false;
     }
-    return connection_profiles_active;
+    return connection_profiles_active === true;
 }
 async function get_current_connection_profile() {
     if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
@@ -1930,6 +1913,7 @@ async function verify_connection_profile(name) {
 }
 async function check_connection_profile_valid()  {
     // check whether the current evaluator connection profile is valid
+    if (connection_profiles_ready !== true) return;
     if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
     let evaluator_connection = get_settings('evaluator_connection_profile')
     let valid = await verify_connection_profile(evaluator_connection)
@@ -2327,21 +2311,24 @@ async function update_preset_dropdown() {
     }
     $preset_select.off('click').on('click', () => update_preset_dropdown());
 }
-async function update_connection_profile_dropdown() {
-    let $connection_select = $(`.${settings_content_class} #evaluator_connection_profile`);
-    if ($connection_select.length === 0) return;
-    const connectionElement = $connection_select.get(0);
-    const selectedConnection = get_settings('evaluator_connection_profile');
-    const connection_options = await get_connection_profiles();
-    if (document.activeElement !== connectionElement) {
-        $connection_select.empty();
-        $connection_select.append(`<option value="">${t`Same as Current`}</option>`);
-        for (let option of connection_options) {
-            $connection_select.append(`<option value="${option}">${option}</option>`);
-        }
-        $connection_select.val(selectedConnection);
+function initialize_connection_profile_dropdown() {
+    const selector = `.${settings_content_class} #evaluator_connection_profile`;
+    const context = getContext();
+    const requestService = context.ConnectionManagerRequestService;
+    if (!requestService?.handleDropdown) return false;
+
+    const $connectionSelect = $(selector);
+    if (!$connectionSelect.length) return false;
+
+    if ($connectionSelect.data('aspectDestiniaCmBound') === true) {
+        return true;
     }
-    $connection_select.off('click').on('click', () => update_connection_profile_dropdown());
+
+    requestService.handleDropdown(selector, get_settings('evaluator_connection_profile'), (profile) => {
+        set_settings('evaluator_connection_profile', profile?.id || '');
+    });
+    $connectionSelect.data('aspectDestiniaCmBound', true);
+    return true;
 }
 function updateTimelinePresetDropdown() {
     const $presetSelect = $(`.${settings_content_class} #timeline_preset`);
@@ -2596,23 +2583,19 @@ function refresh_settings() {
     debug("Refreshing settings...")
 
     // connection profiles
-    if (check_connection_profiles_active()) {
-        update_connection_profile_dropdown()
-        check_connection_profile_valid()
-        $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field').show();
-    } else { // if connection profiles extension isn't active, hide the connection profile dropdown
-        $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field').hide();
-        debug("Connection profiles extension not active. Hiding evaluator connection profile dropdown.")
-        detect_connection_profiles_active().then((active) => {
-            const connectionField = $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field');
-            if (active) {
-                connectionField.show();
-                update_connection_profile_dropdown();
-                check_connection_profile_valid();
-            } else {
-                connectionField.hide();
-            }
-        });
+    const connectionField = $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field');
+    const connectionDropdownReady = initialize_connection_profile_dropdown();
+    if (connectionDropdownReady) {
+        connectionField.show();
+        if (connection_profiles_ready === true && check_connection_profiles_active()) {
+            check_connection_profile_valid();
+        }
+    } else if (connection_profiles_ready !== true) {
+        connectionField.hide();
+        debug("Connection profiles not ready yet. Hiding evaluator connection profile dropdown.")
+    } else {
+        connectionField.hide();
+        debug("Connection Manager dropdown service is unavailable. Hiding evaluator connection profile dropdown.")
     }
 
     // completion presets
@@ -3274,9 +3257,6 @@ function get_character_key(message) {
     // get the unique identifier of the character that sent a message
     return message.original_avatar
 }
-function get_long_guidance() {
-    return '';
-}
 function get_short_guidance() {
     return buildDestiniaGuidance();
 }
@@ -3443,7 +3423,7 @@ function initialize_settings_listeners() {
     bind_setting('#auto_resolve_deviation', 'auto_resolve_deviation', 'boolean');
     bind_setting('#detach_enabled', 'detach_enabled', 'boolean');
     bind_setting('#detach_instruction', 'detach_instruction', 'text');
-    bind_setting('#evaluator_connection_profile', 'evaluator_connection_profile', 'text');
+    initialize_connection_profile_dropdown();
     bind_setting('#evaluator_preset', 'evaluator_preset', 'text');
     bind_setting('#timeline_text', 'timeline_text', 'text');
     $(`.${settings_content_class} #timeline_text`).off('input.aspectDestiniaValidation change.aspectDestiniaValidation').on('input.aspectDestiniaValidation change.aspectDestiniaValidation', () => updateFieldValidationIndicators());
@@ -3631,6 +3611,10 @@ jQuery(async function () {
     let ctx = getContext();
     let eventSource = ctx.eventSource;
     let event_types = ctx.event_types;
+    eventSource.on(event_types.CONNECTION_PROFILE_LOADED, async () => {
+        await detect_connection_profiles_active();
+        refresh_settings();
+    });
     eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, (id) => on_chat_event('char_message', id));
     eventSource.on(event_types.USER_MESSAGE_RENDERED, (id) => on_chat_event('user_message', id));
     eventSource.on(event_types.GROUP_WRAPPER_FINISHED, () => {
