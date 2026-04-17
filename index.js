@@ -279,7 +279,6 @@ const default_settings = {
     last_intent_decision: 'stay',
     last_intent_confidence: 0,
     last_intent_reason: '',
-    last_objective_completion: [],
     evaluator_prompt: DEFAULT_EVALUATOR_PROMPT,
 
     // misc
@@ -555,9 +554,6 @@ function normalizeImportedProfile(data = {}) {
     }
     const timelineResult = getValidatedTimelineText(normalized.timeline_text);
     normalized.timeline_text = timelineResult.timelineText;
-    normalized.last_objective_completion = Array.isArray(normalized.last_objective_completion)
-        ? normalized.last_objective_completion.map(item => Boolean(item))
-        : [];
     return normalized;
 }
 function getDestiniaTimeline() {
@@ -641,6 +637,11 @@ function getCurrentPlotPoint() {
         current: points[currentIndex] || points[0] || null,
         next: points[currentIndex + 1] || null,
     };
+}
+function getCurrentObjectiveCompletionState() {
+    const { current } = getCurrentPlotPoint();
+    const objectives = Array.isArray(current?.objectives) ? current.objectives : [];
+    return objectives.map((objective) => Boolean(typeof objective === 'object' ? objective?.completed : false));
 }
 function buildDestiniaGuidance() {
     if (!get_settings('dest_enabled')) return '';
@@ -756,7 +757,7 @@ function buildDestiniaEvaluatorPrompt() {
         '{{currentTitle}}': current.title,
         '{{currentSummary}}': current.summary,
         '{{currentObjectives}}': JSON.stringify(current.objectives || []),
-        '{{currentObjectiveCompletion}}': JSON.stringify(get_settings('last_objective_completion') || []),
+        '{{currentObjectiveCompletion}}': JSON.stringify(getCurrentObjectiveCompletionState()),
         '{{objectiveCompletionTriggerThreshold}}': String(Number(get_settings('objective_auto_advance_threshold')) || 0),
         '{{nextTitle}}': next?.title || 'None',
         '{{nextSummary}}': next?.summary || 'None',
@@ -990,7 +991,6 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         set_settings('last_intent_decision', decision);
         set_settings('last_intent_confidence', confidence);
         set_settings('last_intent_reason', reason);
-        set_settings('last_objective_completion', objectiveCompletion);
         persistObjectiveCompletionToTimeline(objectiveCompletion);
         const diagnostic = {
             current_plot_title: current?.title || '',
@@ -2560,7 +2560,6 @@ async function freshResetExtensionState() {
     set_settings('last_intent_decision', 'stay');
     set_settings('last_intent_confidence', 0);
     set_settings('last_intent_reason', '');
-    set_settings('last_objective_completion', []);
     resetTimelineObjectivesToFalse();
 
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
