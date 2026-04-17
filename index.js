@@ -1826,7 +1826,7 @@ async function detect_connection_profiles_active() {
     try {
         let ctx = getContext();
         let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`);
-        const parsed = JSON.parse(result?.pipe || '[]');
+        const parsed = JSON.parse(String(result?.pipe || '[]'));
         connection_profiles_active = Array.isArray(parsed);
     } catch {
         connection_profiles_active = false;
@@ -1907,14 +1907,16 @@ async function set_connection_profile(name) {
 async function get_connection_profiles() {
     // Get a list of available connection profiles
 
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
+    if (!check_connection_profiles_active()) return [];  // if the extension isn't active, return
     let ctx = getContext();
     let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`)
     try {
-        return JSON.parse(result.pipe)
+        const parsed = JSON.parse(String(result?.pipe || '[]'));
+        return Array.isArray(parsed) ? parsed : [];
     } catch {
         error("Failed to parse JSON from /profile-list. Result:")
         error(result)
+        return [];
     }
 
 }
@@ -1924,7 +1926,7 @@ async function verify_connection_profile(name) {
     if (name === "") return true;  // no profile selected, always valid
 
     let names = await get_connection_profiles()
-    return names.includes(name)
+    return Array.isArray(names) && names.includes(name)
 }
 async function check_connection_profile_valid()  {
     // check whether the current evaluator connection profile is valid
