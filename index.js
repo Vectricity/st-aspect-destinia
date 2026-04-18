@@ -3118,18 +3118,27 @@ function update_message_visuals(i, style=true, text=null) {
     let rendered = text;
     if (!rendered) {
         const sections = [];
-        if (currentPlot) {
-            sections.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}<div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></div>`);
-        }
+        const objectiveRows = [];
         if (objectiveState.length) {
-            const objectiveRows = [];
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
                 objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-entry"><div class="aspect-destinia-diagnostic-objective-titlebar">${getDiagnosticCheckboxSvg(done)}<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span></div><div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Evaluation:</strong> ${clean_string_for_html(objectiveReason)}</div></div>`);
             });
-            sections.push(`<div class="aspect-destinia-diagnostic-objectives">${objectiveRows.join('')}</div>`);
         }
+
+        const statusParts = [];
+        if (currentPlot) {
+            statusParts.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
+        }
+        if (objectiveRows.length) {
+            statusParts.push(`<div class="aspect-destinia-diagnostic-objectives">${objectiveRows.join('')}</div>`);
+        }
+        if (statusParts.length) {
+            sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Status</strong></summary>${statusParts.join('')}</details>`);
+        }
+
+        sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Controls</strong></summary><div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></details>`);
         rendered = sections.join('');
     }
 
