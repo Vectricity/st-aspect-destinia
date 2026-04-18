@@ -3048,7 +3048,6 @@ function auto_load_profile() {
     // Load the settings profile for the current chat or character
     let profile = get_chat_profile() || get_character_profile();
     load_profile(profile || 'Default');
-    refresh_settings()
 }
 
 
@@ -3238,7 +3237,7 @@ async function get_user_setting_text_input(key, title, description="") {
     let input = await popup.show();
     if (input) {
         set_settings(key, input);
-        refresh_settings()
+        refresh_settings_for_structure()
         refresh_guidance()
     }
 }
@@ -3483,7 +3482,7 @@ function initialize_settings_listeners() {
         updateTimelinePresetControls();
         if (preset?.timelineText) {
             set_settings('timeline_text', preset.timelineText);
-            refresh_settings();
+            refresh_settings_for_timeline_controls();
             refresh_guidance();
         }
     });
@@ -3630,7 +3629,8 @@ jQuery(async function () {
     let event_types = ctx.event_types;
     eventSource.on(event_types.CONNECTION_PROFILE_LOADED, async () => {
         await detect_connection_profiles_active();
-        refresh_settings();
+        apply_structural_settings_surfaces();
+        apply_common_settings_surfaces();
     });
     eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, (id) => on_chat_event('char_message', id));
     eventSource.on(event_types.USER_MESSAGE_RENDERED, (id) => on_chat_event('user_message', id));
