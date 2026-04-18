@@ -2119,8 +2119,8 @@ function bind_setting(selector, key, type=null, callback=null, disable=true) {
             callback(value);
         }
 
-        // update all other settings UI elements
-        refresh_settings()
+        // update only the settings surfaces that should track ordinary field edits
+        sync_settings_ui_after_change();
 
         // refresh Destinia guidance/state after settings changes
         if (trigger === 'change') {
@@ -2560,10 +2560,7 @@ async function freshResetExtensionState() {
     toast('Extension state reset for fresh testing.', 'success');
 }
 
-function refresh_settings() {
-    // Refresh all settings UI elements according to the current settings
-    debug("Refreshing settings...")
-
+function apply_structural_settings_surfaces() {
     // connection profiles
     const connectionField = $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field');
     const connectionDropdownReady = initialize_connection_profile_dropdown();
@@ -2580,17 +2577,35 @@ function refresh_settings() {
         debug("Connection Manager dropdown service is unavailable. Hiding evaluator connection profile dropdown.")
     }
 
-    // completion presets
     update_preset_dropdown()
     check_preset_valid()
-
-    // update the save icon highlight
-    update_save_icon_highlight();
-
-    // update the profile section
     update_profile_section()
     ensureDefaultTimelinePreset()
     updateTimelinePresetDropdown()
+    addFieldResetButtons();
+    addInfoTipsToSettings();
+    setupInfoTooltips();
+}
+function apply_common_settings_surfaces() {
+    update_save_icon_highlight();
+    render_status_panel();
+    update_slider_displays();
+    updateFieldValidationIndicators();
+
+    if (chat_enabled()) {
+        $(`.${settings_content_class} .settings_input`).prop('disabled', false);
+    } else {
+        $(`.${settings_content_class} .settings_input`).prop('disabled', true);
+    }
+}
+function sync_settings_ui_after_change() {
+    apply_common_settings_surfaces();
+}
+function refresh_settings() {
+    // Refresh all settings UI elements according to the current settings
+    debug("Refreshing settings...")
+
+    apply_structural_settings_surfaces();
 
     // Guidance placement controls remain user-tunable; no legacy summary-context token displays are needed here.
 
@@ -2599,22 +2614,7 @@ function refresh_settings() {
         set_setting_ui_element(key, element, type);
     }
 
-    render_status_panel();
-    update_slider_displays();
-    addFieldResetButtons();
-    addInfoTipsToSettings();
-    setupInfoTooltips();
-    updateFieldValidationIndicators();
-
-    // enable or disable settings based on others
-    if (chat_enabled()) {
-        $(`.${settings_content_class} .settings_input`).prop('disabled', false);  // enable all settings
-
-        // evaluator and guidance settings remain active while guidance is enabled for the chat.
-    } else {  // guidance is disabled for this chat
-        $(`.${settings_content_class} .settings_input`).prop('disabled', true);  // disable all settings
-    }
-
+    apply_common_settings_surfaces();
 }
 
 function refresh_select2_element(element, selected, options, placeholder="", callback) {
