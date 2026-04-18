@@ -2631,6 +2631,7 @@ function refresh_settings() {
         set_setting_ui_element(key, element, type);
     }
 
+    render_status_panel();
     apply_common_settings_surfaces();
 }
 
