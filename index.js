@@ -1565,9 +1565,40 @@ function addFieldResetButtons() {
 function get_plot_progression_status() {
     return 'Index-Based';
 }
+function ensure_status_panel_shell(statusRoot) {
+    if (!statusRoot) return;
+    if (statusRoot.dataset.aspectDestiniaStatusInitialized === 'true') return;
+
+    statusRoot.innerHTML = `
+        <div class="aspect-destinia-status-grid">
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Current Plot Point</div>
+                <div class="aspect-destinia-stat-value" data-status-field="current-plot-point"></div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Next Plot Point</div>
+                <div class="aspect-destinia-stat-value" data-status-field="next-plot-point"></div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Plot Progression</div>
+                <div class="aspect-destinia-stat-value" data-status-field="plot-progression"></div>
+            </div>
+            <div class="aspect-destinia-stat">
+                <div class="aspect-destinia-stat-label">Plot Progression Evaluation</div>
+                <div class="aspect-destinia-stat-value" data-status-field="plot-progression-evaluation"></div>
+            </div>
+        </div>
+        <div class="aspect-destinia-objective-list">
+            <div class="aspect-destinia-section-title aspect-destinia-objective-label">Current Objectives</div>
+            <div data-status-field="current-objectives"></div>
+        </div>
+    `;
+    statusRoot.dataset.aspectDestiniaStatusInitialized = 'true';
+}
 function render_status_panel() {
     const statusRoot = document.getElementById('aspect_destinia_status');
     if (!statusRoot) return;
+    ensure_status_panel_shell(statusRoot);
 
     const { current, next } = getCurrentPlotPoint();
     const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
@@ -1579,30 +1610,17 @@ function render_status_panel() {
         }).join('')
         : '<div class="aspect-destinia-empty">No objectives on this plot point.</div>';
 
-    statusRoot.innerHTML = `
-        <div class="aspect-destinia-status-grid">
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Current Plot Point</div>
-                <div class="aspect-destinia-stat-value">${clean_string_for_html(current?.title || 'None')}</div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Next Plot Point</div>
-                <div class="aspect-destinia-stat-value">${clean_string_for_html(next?.title || 'None')}</div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Plot Progression</div>
-                <div class="aspect-destinia-stat-value">${clean_string_for_html(get_plot_progression_status())}</div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Plot Progression Evaluation</div>
-                <div class="aspect-destinia-stat-value">Per-pass diagnostics only</div>
-            </div>
-        </div>
-        <div class="aspect-destinia-objective-list">
-            <div class="aspect-destinia-section-title aspect-destinia-objective-label">Current Objectives</div>
-            ${objectiveMarkup}
-        </div>
-    `;
+    const currentPlotField = statusRoot.querySelector('[data-status-field="current-plot-point"]');
+    const nextPlotField = statusRoot.querySelector('[data-status-field="next-plot-point"]');
+    const plotProgressionField = statusRoot.querySelector('[data-status-field="plot-progression"]');
+    const plotProgressionEvaluationField = statusRoot.querySelector('[data-status-field="plot-progression-evaluation"]');
+    const currentObjectivesField = statusRoot.querySelector('[data-status-field="current-objectives"]');
+
+    if (currentPlotField) currentPlotField.textContent = current?.title || 'None';
+    if (nextPlotField) nextPlotField.textContent = next?.title || 'None';
+    if (plotProgressionField) plotProgressionField.textContent = get_plot_progression_status();
+    if (plotProgressionEvaluationField) plotProgressionEvaluationField.textContent = 'Per-pass diagnostics only';
+    if (currentObjectivesField) currentObjectivesField.innerHTML = objectiveMarkup;
 }
 function escape_string(text) {
     // escape control characters in the text
@@ -2588,7 +2606,6 @@ function apply_structural_settings_surfaces() {
 }
 function apply_common_settings_surfaces() {
     update_save_icon_highlight();
-    render_status_panel();
     update_slider_displays();
     updateFieldValidationIndicators();
 
