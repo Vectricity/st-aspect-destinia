@@ -2390,7 +2390,7 @@ function createTimelinePreset(duplicate = false) {
     };
     set_settings('timeline_presets', presets);
     set_settings('selected_timeline_preset', id);
-    refresh_settings();
+    refresh_settings_for_timeline_controls();
 }
 async function renameSelectedTimelinePreset() {
     const presetId = get_settings('selected_timeline_preset');
@@ -2405,7 +2405,7 @@ async function renameSelectedTimelinePreset() {
     preset.name = trimmed;
     presets[presetId] = preset;
     set_settings('timeline_presets', presets);
-    refresh_settings();
+    refresh_settings_for_timeline_controls();
 }
 
 function stepPlotPoint(delta = 0) {
@@ -2413,13 +2413,13 @@ function stepPlotPoint(delta = 0) {
     if (!Array.isArray(points) || !points.length) return;
     const nextIndex = Math.max(0, Math.min(currentIndex + Number(delta || 0), points.length - 1));
     set_settings('current_plot_index', nextIndex);
-    refresh_settings();
+    render_status_panel();
     refresh_guidance();
 }
 
 function resetPlotPointToFirst() {
     set_settings('current_plot_index', 0);
-    refresh_settings();
+    render_status_panel();
     refresh_guidance();
 }
 
@@ -2431,7 +2431,7 @@ function saveSelectedTimelinePreset() {
     presets[presetId].timelineText = timelineResult.timelineText;
     set_settings('timeline_text', timelineResult.timelineText);
     set_settings('timeline_presets', presets);
-    refresh_settings();
+    refresh_settings_for_timeline_controls();
 }
 
 async function deleteSelectedTimelinePreset() {
@@ -2445,14 +2445,14 @@ async function deleteSelectedTimelinePreset() {
     set_settings('timeline_presets', presets);
     set_settings('selected_timeline_preset', 'default_timeline_preset');
     set_settings('timeline_text', String(presets.default_timeline_preset?.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2)));
-    refresh_settings();
+    refresh_settings_for_timeline_controls();
     refresh_guidance();
 }
 function exportTimelineToFile() {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
     if (!timelineResult.valid) {
         toast(`Cannot export invalid timeline: ${timelineResult.issues.join('; ')}`, 'warning');
-        refresh_settings();
+        updateFieldValidationIndicators();
         return;
     }
     download(timelineResult.timelineText, 'timeline.json', 'application/json');
@@ -2465,11 +2465,11 @@ async function importTimelineFromFile(event) {
         const timelineResult = getValidatedTimelineText(JSON.stringify(imported, null, 2));
         if (!timelineResult.valid) {
             toast(`Failed to import timeline: ${timelineResult.issues.join('; ')}`, 'warning');
-            refresh_settings();
+            updateFieldValidationIndicators();
             return;
         }
         set_settings('timeline_text', timelineResult.timelineText);
-        refresh_settings();
+        refresh_settings_for_timeline_controls();
         refresh_guidance();
         toast('Imported timeline from file.', 'success');
     } finally {
@@ -2617,6 +2617,21 @@ function apply_common_settings_surfaces() {
 }
 function sync_settings_ui_after_change() {
     apply_common_settings_surfaces();
+}
+function refresh_settings_for_structure() {
+    refresh_settings();
+}
+function refresh_settings_for_profile_section() {
+    update_profile_section();
+    update_save_icon_highlight();
+    updateFieldValidationIndicators();
+}
+function refresh_settings_for_timeline_controls() {
+    ensureDefaultTimelinePreset();
+    updateTimelinePresetDropdown();
+    update_save_icon_highlight();
+    update_slider_displays();
+    updateFieldValidationIndicators();
 }
 function refresh_settings() {
     // Refresh all settings UI elements according to the current settings
@@ -2814,7 +2829,7 @@ async function import_profile(e) {
     toast(`Aspect: Destinia profile \"${name}\" imported`, 'success')
     e.target.value = null;
 
-    refresh_settings()
+    refresh_settings_for_profile_section()
 }
 async function rename_profile() {
     // Rename the current profile via user input
@@ -2850,7 +2865,7 @@ async function rename_profile() {
     }
 
     log(`Renamed profile [${old_name}] to [${new_name}]`);
-    refresh_settings()
+    refresh_settings_for_profile_section()
 }
 function new_profile() {
     registerKnownChat();
@@ -2968,7 +2983,7 @@ function set_character_profile(key, profile=null) {
     }
 
     set_settings('character_profiles', character_profiles);
-    refresh_settings()
+    refresh_settings_for_profile_section()
 }
 function get_chat_profile() {
     // Get the profile for the current chat
@@ -2988,7 +3003,7 @@ function set_chat_profile(profile=null) {
     }
     set_settings('chat_profiles', chatProfiles);
     registerKnownChat();
-    refresh_settings()
+    refresh_settings_for_profile_section()
 }
 function attach_profile_to_selected_known_chat(chatKey) {
     const selectedChatKey = String(chatKey || '').trim();
@@ -3019,14 +3034,13 @@ function attach_profile_to_selected_known_chat(chatKey) {
     }
 
     set_settings('chat_profiles', chatProfiles);
-    refresh_settings();
+    refresh_settings_for_profile_section();
     refresh_guidance();
 }
 function attach_current_chat_to_profile() {
     registerKnownChat();
     const profile = get_settings('profile');
     set_chat_profile(profile);
-    refresh_settings();
     refresh_guidance();
     toast(`Attached current chat to profile "${profile}"`, 'success');
 }
