@@ -3114,6 +3114,7 @@ function update_message_visuals(i, style=true, text=null) {
         return;
     }
 
+    const liveCurrentPlot = getCurrentPlotPoint().current?.title || '';
     const message_element = div_element.find('div.mes_text');
     let rendered = text;
     if (!rendered) {
@@ -3138,7 +3139,7 @@ function update_message_visuals(i, style=true, text=null) {
             sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Status</strong></summary>${statusParts.join('')}</details>`);
         }
 
-        sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Controls</strong></summary><div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></details>`);
+        sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Controls</strong></summary><div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(liveCurrentPlot || 'None')}</div><div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></details>`);
         rendered = sections.join('');
     }
 
