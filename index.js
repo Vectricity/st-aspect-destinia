@@ -3649,7 +3649,10 @@ jQuery(async function () {
     eventSource.on(event_types.MESSAGE_SWIPED, (id) => on_chat_event('message_swiped', id));
     eventSource.on(event_types.CHAT_CHANGED, () => on_chat_event('chat_changed'));
     eventSource.on(event_types.MORE_MESSAGES_LOADED, refresh_guidance)
-    eventSource.on(event_types.SETTINGS_UPDATED, refresh_settings)  // refresh extension settings when ST settings change
+    eventSource.on(event_types.SETTINGS_UPDATED, () => {
+        apply_structural_settings_surfaces();
+        apply_common_settings_surfaces();
+    })  // refresh extension settings when ST settings change without forcing a full panel rewrite
     eventSource.on(event_types.GENERATION_STARTED, (type, stuff, dry) => on_chat_event('before_message', {'type': type, 'dry': dry}))
 
 });
