@@ -1562,9 +1562,6 @@ function addFieldResetButtons() {
         }
     }
 }
-function get_plot_progression_status() {
-    return 'Index-Based';
-}
 function ensure_status_panel_shell(statusRoot) {
     if (!statusRoot) return;
     if (statusRoot.dataset.aspectDestiniaStatusInitialized === 'true') return;
@@ -1578,14 +1575,6 @@ function ensure_status_panel_shell(statusRoot) {
             <div class="aspect-destinia-stat">
                 <div class="aspect-destinia-stat-label">Next Plot Point</div>
                 <div class="aspect-destinia-stat-value" data-status-field="next-plot-point"></div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Plot Progression</div>
-                <div class="aspect-destinia-stat-value" data-status-field="plot-progression"></div>
-            </div>
-            <div class="aspect-destinia-stat">
-                <div class="aspect-destinia-stat-label">Plot Progression Evaluation</div>
-                <div class="aspect-destinia-stat-value" data-status-field="plot-progression-evaluation"></div>
             </div>
         </div>
         <div class="aspect-destinia-objective-list">
@@ -1612,14 +1601,10 @@ function render_status_panel() {
 
     const currentPlotField = statusRoot.querySelector('[data-status-field="current-plot-point"]');
     const nextPlotField = statusRoot.querySelector('[data-status-field="next-plot-point"]');
-    const plotProgressionField = statusRoot.querySelector('[data-status-field="plot-progression"]');
-    const plotProgressionEvaluationField = statusRoot.querySelector('[data-status-field="plot-progression-evaluation"]');
     const currentObjectivesField = statusRoot.querySelector('[data-status-field="current-objectives"]');
 
     if (currentPlotField) currentPlotField.textContent = current?.title || 'None';
     if (nextPlotField) nextPlotField.textContent = next?.title || 'None';
-    if (plotProgressionField) plotProgressionField.textContent = get_plot_progression_status();
-    if (plotProgressionEvaluationField) plotProgressionEvaluationField.textContent = 'Per-pass diagnostics only';
     if (currentObjectivesField) currentObjectivesField.innerHTML = objectiveMarkup;
 }
 function escape_string(text) {
