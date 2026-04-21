@@ -3117,6 +3117,7 @@ function update_message_visuals(i, style=true, text=null) {
     const message = chat[i];
     const diagnostic = get_data(message, 'diagnostic') || null;
     const currentPlot = diagnostic?.current_plot_title || get_data(message, 'current_plot_title') || '';
+    const hasDiagnosticPayload = Boolean(diagnostic);
     const objectiveState = Array.isArray(diagnostic?.objective_completion) ? diagnostic.objective_completion : [];
     const objectiveLabels = Array.isArray(diagnostic?.objectives) ? diagnostic.objectives : [];
     const objectiveReasons = Array.isArray(diagnostic?.objective_reasons) ? diagnostic.objective_reasons : [];
@@ -3126,7 +3127,7 @@ function update_message_visuals(i, style=true, text=null) {
         ? Math.max(0, Math.min(100, ((Date.now() - active_diagnostic_loading_started_at) / 12000) * 100))
         : 0;
 
-    if (!currentPlot && !objectiveState.length && !text && !isLoadingDiagnostic) {
+    if (!hasDiagnosticPayload && !currentPlot && !objectiveState.length && !text && !isLoadingDiagnostic) {
         return;
     }
 
