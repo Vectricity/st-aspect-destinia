@@ -299,7 +299,6 @@ const default_settings = {
     intent_window: 2,
     evaluator_connection_profile: '',
     evaluator_preset: '',
-    current_plot_index: 0,
     evaluator_prompt: DEFAULT_EVALUATOR_PROMPT,
 
     // misc
@@ -2564,7 +2563,6 @@ function stepPlotPoint(delta = 0) {
     timeline.transitionTo = null;
     const nextTimelineText = JSON.stringify(timeline, null, 2);
     set_settings('timeline_text', nextTimelineText);
-    set_settings('current_plot_index', nextIndex);
     render_status_panel();
     refresh_guidance();
 }
@@ -2578,7 +2576,6 @@ function resetPlotPointToFirst() {
     timeline.transitionTo = null;
     const nextTimelineText = JSON.stringify(timeline, null, 2);
     set_settings('timeline_text', nextTimelineText);
-    set_settings('current_plot_index', 0);
     render_status_panel();
     refresh_guidance();
 }
@@ -2713,7 +2710,14 @@ async function freshResetExtensionState() {
         set_settings(key, structuredClone(default_settings[key]));
     }
 
-    set_settings('current_plot_index', 0);
+    const timeline = getDestiniaTimeline();
+    const firstPoint = Array.isArray(timeline.plotPoints) ? timeline.plotPoints[0] : null;
+    if (firstPoint) {
+        timeline.currentPlotPoint = firstPoint.id;
+    }
+    timeline.transitionFrom = null;
+    timeline.transitionTo = null;
+    set_settings('timeline_text', JSON.stringify(timeline, null, 2));
     resetTimelineObjectivesToFalse();
 
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
@@ -3447,7 +3451,7 @@ function refresh_guidance() {
     }
 
     trace_debug('RefreshGuidance', {
-        currentPlotIndex: get_settings('current_plot_index'),
+        currentPlotPoint: getCurrentPlotPoint().current?.id || '',
         position: shortTermPosition,
         depth: get_settings('guidance_depth'),
         role: get_settings('guidance_role'),
