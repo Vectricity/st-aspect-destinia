@@ -127,7 +127,7 @@ const DEFAULT_TIMELINE_TEMPLATE = {
 };
 
 const DEFAULT_EVALUATOR_PROMPT = `You are evaluating roleplay progression for a story timeline controller.
-Read the recent chat and determine whether the conversation should stagnate on the current plot point or progress toward the next plot point.
+Read the recent chat and determine whether the current plot point should remain active or whether transition state should be set.
 Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.
 Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.
 {{objectiveCompletionGuidance}}
@@ -150,6 +150,24 @@ Current objective completion booleans: {{currentObjectiveCompletion}}
 Objective completion trigger threshold: {{objectiveCompletionTriggerThreshold}}
 Next plot point title: {{nextTitle}}
 Next plot point summary: {{nextSummary}}
+Recent chat selected for evaluation:
+{{recentChat}}`;
+const DEFAULT_TRANSITION_COMPLETION_PROMPT = `You are evaluating whether an active story transition has completed.
+Read the recent chat and determine whether the transition from the source plot point to the destination plot point has actually completed in the narrative.
+Judge completion based on whether the story has meaningfully bridged from source context into destination context.
+Return ONLY valid JSON with these keys:
+{
+  "decision": "incomplete" | "complete",
+  "confidence": 0.0,
+  "reason": "short explanation"
+}
+Story title: {{storyTitle}}
+Story style: {{storyStyle}}
+Transition source plot point title: {{sourceTitle}}
+Transition source plot point summary: {{sourceSummary}}
+Transition destination plot point title: {{destinationTitle}}
+Transition destination plot point summary: {{destinationSummary}}
+Transition guidance: {{transitionGuidance}}
 Recent chat selected for evaluation:
 {{recentChat}}`;
 
@@ -851,6 +869,26 @@ function buildDestiniaEvaluatorPrompt() {
     }
     return prompt;
 }
+function buildTransitionCompletionPrompt() {
+    const { timeline, source, destination } = getTransitionState();
+    if (!source || !destination) return '';
+    const { recentChat } = getRecentEvaluationContext();
+    const replace = {
+        '{{storyTitle}}': timeline.storyTitle,
+        '{{storyStyle}}': timeline.systemStyle,
+        '{{sourceTitle}}': source.title,
+        '{{sourceSummary}}': source.summary,
+        '{{destinationTitle}}': destination.title,
+        '{{destinationSummary}}': destination.summary,
+        '{{transitionGuidance}}': source.transitionGuidance || '',
+        '{{recentChat}}': recentChat.map(formatEvaluationMessageLine).join('\n'),
+    };
+    let prompt = DEFAULT_TRANSITION_COMPLETION_PROMPT;
+    for (const [token, value] of Object.entries(replace)) {
+        prompt = prompt.replaceAll(token, value);
+    }
+    return prompt;
+}
 async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = []) {
     const { timeline, current } = getCurrentPlotPoint();
     const { recentChat } = getRecentEvaluationContext();
@@ -1024,7 +1062,10 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         debug('Skipping duplicate Destinia evaluation for unchanged evidence');
         return null;
     }
-    const prompt = buildDestiniaEvaluatorPrompt();
+    const transitionState = getTransitionState();
+    const prompt = transitionState.transitionActive
+        ? buildTransitionCompletionPrompt()
+        : buildDestiniaEvaluatorPrompt();
     if (!prompt) return null;
     const evaluatorPreset = get_settings('evaluator_preset');
     const evaluatorProfile = get_settings('evaluator_connection_profile');
@@ -1043,15 +1084,45 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             evaluatorPreset,
             promptLength: prompt.length,
             promptPreview: prompt.slice(0, 300),
+            transitionActive: transitionState.transitionActive,
         });
         const response = await generateRaw({
             prompt,
             trimNames: false,
         });
         const parsed = JSON.parse(String(response || '').trim());
+
+        if (transitionState.transitionActive) {
+            const completion = String(parsed?.decision || '').trim().toLowerCase();
+            const diagnostic = {
+                current_plot_title: transitionState.source?.title || '',
+                objective_completion: [],
+                objectives: [],
+                objective_reasons: [],
+                did_advance: false,
+            };
+            if (completion === 'complete' && transitionState.destination) {
+                const timeline = getDestiniaTimeline();
+                timeline.currentPlotPoint = transitionState.destination.id;
+                timeline.transitionFrom = null;
+                timeline.transitionTo = null;
+                const nextTimelineText = JSON.stringify(timeline, null, 2);
+                set_settings('timeline_text', nextTimelineText);
+                diagnostic.did_advance = true;
+            }
+            if (resolvedTargetMessage) {
+                const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
+                set_data(resolvedTargetMessage, 'current_plot_title', transitionState.source?.title || '');
+                set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
+                finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
+            }
+            lastEvaluationKey = evaluationKey;
+            render_status_panel();
+            return parsed;
+        }
+
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
-        const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'advance' : 'stay';
-        const confidence = Number(parsed?.confidence) || 0;
+        const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'progress' : 'stagnate';
         const { current, points, currentIndex } = getCurrentPlotPoint();
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
@@ -1075,8 +1146,13 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             objective_reasons: objectiveResults.map((result) => String(result?.reason || '')),
             did_advance: false,
         };
-        if (decision === 'advance' && currentIndex < points.length - 1) {
-            set_settings('current_plot_index', currentIndex + 1);
+        if (decision === 'progress' && currentIndex < points.length - 1) {
+            const destination = points[currentIndex + 1];
+            const timeline = getDestiniaTimeline();
+            timeline.transitionFrom = current?.id || null;
+            timeline.transitionTo = destination?.id || null;
+            const nextTimelineText = JSON.stringify(timeline, null, 2);
+            set_settings('timeline_text', nextTimelineText);
             diagnostic.did_advance = true;
         }
         if (resolvedTargetMessage) {
