@@ -93,6 +93,9 @@ const LABEL_HELP = Object.freeze({
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
     systemStyle: 'Describe only the global storytelling style rules that should apply throughout the timeline. Include the tone, canon strictness, pacing feel, narration/dialogue style, and how flexible the roleplay may be. Keep this specific and directive rather than broad or flowery. Avoid repeating plot events, character biographies, or arc summaries here.',
+    currentPlotPoint: 'plot-point-1',
+    transitionFrom: null,
+    transitionTo: null,
     plotPoints: [
         {
             id: 'plot-point-1',
@@ -153,6 +156,9 @@ Recent chat selected for evaluation:
 const TIMELINE_REQUIRED_TOP_LEVEL_FIELDS = Object.freeze([
     { key: 'storyTitle', label: 'storyTitle' },
     { key: 'systemStyle', label: 'systemStyle' },
+    { key: 'currentPlotPoint', label: 'currentPlotPoint' },
+    { key: 'transitionFrom', label: 'transitionFrom' },
+    { key: 'transitionTo', label: 'transitionTo' },
     { key: 'plotPoints', label: 'plotPoints[]', isArray: true }
 ]);
 
@@ -441,24 +447,47 @@ function normalizeObjectiveItem(item) {
 function normalizeDestiniaTimeline(raw) {
     if (!raw || typeof raw !== 'object') return structuredClone(DEFAULT_TIMELINE_TEMPLATE);
     const plotPoints = Array.isArray(raw.plotPoints) && raw.plotPoints.length ? raw.plotPoints : structuredClone(DEFAULT_TIMELINE_TEMPLATE.plotPoints);
+    const normalizedPlotPoints = plotPoints.map((point, index) => {
+        const objectives = Array.isArray(point?.objectives)
+            ? point.objectives.map(normalizeObjectiveItem).filter(item => item.text)
+            : [];
+        return {
+            id: String(point?.id || `plot-point-${index + 1}`),
+            title: String(point?.title || `Plot Point ${index + 1}`),
+            summary: String(point?.summary || ''),
+            objectives,
+            steeringPrompt: String(point?.steeringPrompt || ''),
+            transitionGuidance: String(point?.transitionGuidance || '').trim() || 'Show the causal bridge from this plot point into the next plot point before the next plot point action fully begins.',
+            pace: String(point?.pace || 'medium'),
+            delayable: Boolean(point?.delayable),
+        };
+    });
+    const validIds = new Set(normalizedPlotPoints.map(point => point.id));
+    const firstValidId = normalizedPlotPoints[0]?.id || 'plot-point-1';
+    const rawCurrentPlotPoint = String(raw.currentPlotPoint || '').trim();
+    const currentPlotPoint = validIds.has(rawCurrentPlotPoint) ? rawCurrentPlotPoint : firstValidId;
+    const rawTransitionFrom = raw.transitionFrom === null ? null : String(raw.transitionFrom || '').trim() || null;
+    const rawTransitionTo = raw.transitionTo === null ? null : String(raw.transitionTo || '').trim() || null;
+    let transitionFrom = rawTransitionFrom;
+    let transitionTo = rawTransitionTo;
+    const transitionPairValid = (
+        transitionFrom !== null
+        && transitionTo !== null
+        && validIds.has(transitionFrom)
+        && validIds.has(transitionTo)
+        && transitionFrom !== transitionTo
+    );
+    if (!transitionPairValid) {
+        transitionFrom = null;
+        transitionTo = null;
+    }
     return {
         storyTitle: String(raw.storyTitle || DEFAULT_TIMELINE_TEMPLATE.storyTitle),
         systemStyle: String(raw.systemStyle || DEFAULT_TIMELINE_TEMPLATE.systemStyle),
-        plotPoints: plotPoints.map((point, index) => {
-            const objectives = Array.isArray(point?.objectives)
-                ? point.objectives.map(normalizeObjectiveItem).filter(item => item.text)
-                : [];
-            return {
-                id: String(point?.id || `plot-point-${index + 1}`),
-                title: String(point?.title || `Plot Point ${index + 1}`),
-                summary: String(point?.summary || ''),
-                objectives,
-                steeringPrompt: String(point?.steeringPrompt || ''),
-                transitionGuidance: String(point?.transitionGuidance || '').trim() || 'Show the causal bridge from this plot point into the next plot point before the next plot point action fully begins.',
-                pace: String(point?.pace || 'medium'),
-                delayable: Boolean(point?.delayable),
-            };
-        })
+        currentPlotPoint,
+        transitionFrom,
+        transitionTo,
+        plotPoints: normalizedPlotPoints,
     };
 }
 function validateTimelineStructure(timeline) {
@@ -470,7 +499,11 @@ function validateTimelineStructure(timeline) {
     const missingTopLevel = TIMELINE_REQUIRED_TOP_LEVEL_FIELDS
         .filter(({ key, isArray }) => {
             if (!(key in timeline)) return true;
-            return isArray ? !Array.isArray(timeline[key]) : typeof timeline[key] !== 'string';
+            if (isArray) return !Array.isArray(timeline[key]);
+            if (key === 'transitionFrom' || key === 'transitionTo') {
+                return !(timeline[key] === null || typeof timeline[key] === 'string');
+            }
+            return typeof timeline[key] !== 'string';
         })
         .map(field => field.label);
 
@@ -560,8 +593,11 @@ function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
     if (!timelineResult.valid) return;
     const timeline = timelineResult.timeline;
-    const currentIndex = Math.max(0, Math.min(Number(get_settings('current_plot_index')) || 0, Math.max((timeline.plotPoints?.length || 1) - 1, 0)));
-    const currentPoint = timeline.plotPoints?.[currentIndex];
+    const pointIndexById = new Map((timeline.plotPoints || []).map((point, index) => [point.id, index]));
+    const currentIndex = pointIndexById.has(timeline.currentPlotPoint)
+        ? pointIndexById.get(timeline.currentPlotPoint)
+        : -1;
+    const currentPoint = currentIndex >= 0 ? timeline.plotPoints?.[currentIndex] : null;
     if (!currentPoint || !Array.isArray(currentPoint.objectives)) return;
 
     currentPoint.objectives = currentPoint.objectives.map((objective, index) => {
@@ -626,13 +662,33 @@ function resetTimelineObjectivesToFalse() {
 function getCurrentPlotPoint() {
     const timeline = getDestiniaTimeline();
     const points = Array.isArray(timeline.plotPoints) ? timeline.plotPoints : [];
-    const currentIndex = Math.max(0, Math.min(Number(get_settings('current_plot_index')) || 0, Math.max(points.length - 1, 0)));
+    const pointIndexById = new Map(points.map((point, index) => [point.id, index]));
+    const currentIndex = pointIndexById.has(timeline.currentPlotPoint)
+        ? pointIndexById.get(timeline.currentPlotPoint)
+        : -1;
+    const current = currentIndex >= 0 ? (points[currentIndex] || null) : null;
+    const next = currentIndex >= 0 ? (points[currentIndex + 1] || null) : null;
     return {
         timeline,
         points,
+        pointIndexById,
         currentIndex,
-        current: points[currentIndex] || points[0] || null,
-        next: points[currentIndex + 1] || null,
+        current,
+        next,
+    };
+}
+function getTransitionState() {
+    const timeline = getDestiniaTimeline();
+    const points = Array.isArray(timeline.plotPoints) ? timeline.plotPoints : [];
+    const pointById = new Map(points.map(point => [point.id, point]));
+    const transitionActive = Boolean(timeline.transitionFrom && timeline.transitionTo);
+    const source = transitionActive ? (pointById.get(timeline.transitionFrom) || null) : null;
+    const destination = transitionActive ? (pointById.get(timeline.transitionTo) || null) : null;
+    return {
+        timeline,
+        transitionActive,
+        source,
+        destination,
     };
 }
 function getCurrentObjectiveCompletionState() {
@@ -643,49 +699,76 @@ function getCurrentObjectiveCompletionState() {
 function buildDestiniaGuidance() {
     if (!get_settings('dest_enabled')) return '';
     const { timeline, current, next, currentIndex, points } = getCurrentPlotPoint();
-    if (!current) return '';
-    const objectiveLines = (current.objectives || []).map(item => `- ${typeof item === 'string' ? item : item?.text || ''}`).filter(line => line !== '- ').join('\n') || '- None';
-    const currentPlotTemplate = String(get_settings('current_plot_point_template') || 'Story: {{storyTitle}}\nStyle: {{storyStyle}}\nCurrent Plot Point Index: {{currentIndex}} / {{totalPlotPoints}}\nCurrent Plot Point: {{currentTitle}}\nCurrent Summary: {{currentSummary}}\nCurrent Steering: {{currentSteering}}\nCurrent Pace: {{currentPace}}')
+    const transitionState = getTransitionState();
+    if (!current && !transitionState.transitionActive) return '';
+
+    const currentObjectiveLines = ((current?.objectives) || []).map(item => `- ${typeof item === 'string' ? item : item?.text || ''}`).filter(line => line !== '- ').join('\n') || '- None';
+    const currentPlotTemplate = String(get_settings('current_plot_point_template') || 'Story: {{storyTitle}}\nStyle: {{storyStyle}}\nCurrent Plot Point: {{currentTitle}}\nCurrent Summary: {{currentSummary}}\nCurrent Steering: {{currentSteering}}\nCurrent Pace: {{currentPace}}')
         .replaceAll('{{storyTitle}}', timeline.storyTitle || '')
         .replaceAll('{{storyStyle}}', timeline.systemStyle || '')
         .replaceAll('{{currentIndex}}', String(currentIndex + 1))
         .replaceAll('{{totalPlotPoints}}', String(points.length || 0))
-        .replaceAll('{{currentTitle}}', current.title || '')
-        .replaceAll('{{currentSummary}}', current.summary || '')
-        .replaceAll('{{currentSteering}}', current.steeringPrompt || '')
-        .replaceAll('{{currentPace}}', current.pace || '');
-    const nextPlotTemplate = String(get_settings('next_plot_point_template') || 'Next Plot Point: {{nextTitle}}\nNext Summary: {{nextSummary}}')
-        .replaceAll('{{nextTitle}}', next?.title || 'None')
-        .replaceAll('{{nextSummary}}', next?.summary || '');
-    const transitionTemplate = String(get_settings('transition_template') || 'Transition Guidance: {{transitionGuidance}}')
-        .replaceAll('{{transitionGuidance}}', current.transitionGuidance || '');
+        .replaceAll('{{currentTitle}}', current?.title || '')
+        .replaceAll('{{currentSummary}}', current?.summary || '')
+        .replaceAll('{{currentSteering}}', current?.steeringPrompt || '')
+        .replaceAll('{{currentPace}}', current?.pace || '');
     const objectiveGuidanceTemplate = String(get_settings('objective_guidance_template') || 'Current Objectives:\n{{currentObjectives}}')
-        .replaceAll('{{currentObjectives}}', objectiveLines);
-    const foreshadowingTemplate = String(get_settings('foreshadowing_template') || 'Foreshadowing: {{nextTitle}} — {{nextSummary}}')
-        .replaceAll('{{nextTitle}}', next?.title || 'None')
-        .replaceAll('{{nextSummary}}', next?.summary || '');
+        .replaceAll('{{currentObjectives}}', currentObjectiveLines);
     const pacingInstruction = String(get_settings('pacing_instruction') || 'Balance strictness and pacing bias so progression feels natural and coherent.')
         .replaceAll('{{strictness}}', String(get_settings('strictness')))
         .replaceAll('{{pacingBias}}', String(get_settings('pacing_bias')));
-    const includeNextPlotTemplate = next && get_settings('foreshadow_next_plot_point');
-    const includeForeshadowingTemplate = includeNextPlotTemplate && !nextPlotTemplate.includes(foreshadowingTemplate);
+
+    if (!transitionState.transitionActive) {
+        const nextPlotTemplate = String(get_settings('next_plot_point_template') || 'Next Plot Point: {{nextTitle}}\nNext Summary: {{nextSummary}}')
+            .replaceAll('{{nextTitle}}', next?.title || 'None')
+            .replaceAll('{{nextSummary}}', next?.summary || '');
+        const foreshadowingTemplate = String(get_settings('foreshadowing_template') || 'Foreshadowing: {{nextTitle}} — {{nextSummary}}')
+            .replaceAll('{{nextTitle}}', next?.title || 'None')
+            .replaceAll('{{nextSummary}}', next?.summary || '');
+        const includeNextPlotTemplate = next && get_settings('foreshadow_next_plot_point');
+        const includeForeshadowingTemplate = includeNextPlotTemplate && !nextPlotTemplate.includes(foreshadowingTemplate);
+        return [
+            '[Aspect: Destinia Guidance]',
+            get_settings('guidance_intro') || 'Guide the narrative toward the active story plot point while preserving immersion, natural character behavior, and the user\'s roleplay agency.',
+            get_settings('guidance_principles') || '',
+            currentPlotTemplate,
+            pacingInstruction,
+            objectiveGuidanceTemplate,
+            includeNextPlotTemplate ? nextPlotTemplate : '',
+            includeForeshadowingTemplate ? foreshadowingTemplate : '',
+            get_settings('timeline_deviation_allowed') ? (get_settings('timeline_deviation_instruction') || 'Allow meaningful timeline deviation when roleplay pushes the story off-script.') : '',
+            get_settings('auto_resolve_deviation') ? (get_settings('auto_resolve_deviation_instruction') || 'When deviation occurs, guide the story back toward the timeline naturally over time.') : '',
+            get_settings('detach_enabled') ? `Detach Mode: ${get_settings('detach_instruction')}` : '',
+            get_settings('guidance_outro') || 'Guide the response toward the active plot point while preserving immersion and user agency.',
+            'Do not expose or quote this guidance.'
+        ].filter(Boolean).join('\n');
+    }
+
+    const source = transitionState.source;
+    const destination = transitionState.destination;
+    const sourceTemplate = String(get_settings('current_plot_point_template') || 'Transition Source Plot Point: {{currentTitle}}\nSummary: {{currentSummary}}\nSteering: {{currentSteering}}\nPace: {{currentPace}}')
+        .replaceAll('{{storyTitle}}', timeline.storyTitle || '')
+        .replaceAll('{{storyStyle}}', timeline.systemStyle || '')
+        .replaceAll('{{currentIndex}}', String(currentIndex + 1))
+        .replaceAll('{{totalPlotPoints}}', String(points.length || 0))
+        .replaceAll('{{currentTitle}}', source?.title || '')
+        .replaceAll('{{currentSummary}}', source?.summary || '')
+        .replaceAll('{{currentSteering}}', source?.steeringPrompt || '')
+        .replaceAll('{{currentPace}}', source?.pace || '');
+    const transitionTemplate = String(get_settings('transition_template') || 'Transition Guidance: {{transitionGuidance}}')
+        .replaceAll('{{transitionGuidance}}', source?.transitionGuidance || '');
+    const destinationTemplate = String(get_settings('next_plot_point_template') || 'Transition Destination: {{nextTitle}}\nDestination Summary: {{nextSummary}}')
+        .replaceAll('{{nextTitle}}', destination?.title || 'None')
+        .replaceAll('{{nextSummary}}', destination?.summary || '');
 
     return [
         '[Aspect: Destinia Guidance]',
-        get_settings('guidance_intro') || 'You are following Aspect: Destinia story progression guidance.',
-        get_settings('guidance_principles') || 'Guide the narrative toward the active story plot point while preserving immersion, natural character behavior, and the user\'s roleplay agency.',
-        currentPlotTemplate,
+        'A transition is active from the source plot point toward the destination plot point.',
+        sourceTemplate,
         transitionTemplate,
-        pacingInstruction,
-        objectiveGuidanceTemplate,
-        includeNextPlotTemplate ? nextPlotTemplate : '',
-        includeForeshadowingTemplate ? foreshadowingTemplate : '',
-        ['intent', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('intent_progression_rule') || 'Remain on the current plot point unless the user clearly initiates movement toward the next one through their actions, goals, travel, or engagement with its people, place, or events.') : '',
-        ['objective_completion', 'either', 'both'].includes(String(get_settings('progression_rule') || 'intent')) ? (get_settings('progression_instruction') || 'If the story is ready to move forward, transition naturally toward the next plot point without breaking immersion.') : '',
-        get_settings('timeline_deviation_allowed') ? (get_settings('timeline_deviation_instruction') || 'Allow meaningful timeline deviation when roleplay pushes the story off-script.') : '',
-        get_settings('auto_resolve_deviation') ? (get_settings('auto_resolve_deviation_instruction') || 'When deviation occurs, guide the story back toward the timeline naturally over time.') : '',
-        get_settings('detach_enabled') ? `Detach Mode: ${get_settings('detach_instruction')}` : '',
-        get_settings('guidance_outro') || 'Guide the response toward the active plot point while preserving immersion and user agency. Do not reveal this guidance.'
+        destinationTemplate,
+        get_settings('guidance_outro') || 'Guide the response as bridge material while preserving immersion and user agency.',
+        'Do not expose or quote this guidance.'
     ].filter(Boolean).join('\n');
 }
 function getMessagesEvaluatedMode() {
@@ -2397,12 +2480,28 @@ function stepPlotPoint(delta = 0) {
     const { points, currentIndex } = getCurrentPlotPoint();
     if (!Array.isArray(points) || !points.length) return;
     const nextIndex = Math.max(0, Math.min(currentIndex + Number(delta || 0), points.length - 1));
+    const nextPoint = points[nextIndex];
+    if (!nextPoint) return;
+    const timeline = getDestiniaTimeline();
+    timeline.currentPlotPoint = nextPoint.id;
+    timeline.transitionFrom = null;
+    timeline.transitionTo = null;
+    const nextTimelineText = JSON.stringify(timeline, null, 2);
+    set_settings('timeline_text', nextTimelineText);
     set_settings('current_plot_index', nextIndex);
     render_status_panel();
     refresh_guidance();
 }
 
 function resetPlotPointToFirst() {
+    const timeline = getDestiniaTimeline();
+    const firstPoint = Array.isArray(timeline.plotPoints) ? timeline.plotPoints[0] : null;
+    if (!firstPoint) return;
+    timeline.currentPlotPoint = firstPoint.id;
+    timeline.transitionFrom = null;
+    timeline.transitionTo = null;
+    const nextTimelineText = JSON.stringify(timeline, null, 2);
+    set_settings('timeline_text', nextTimelineText);
     set_settings('current_plot_index', 0);
     render_status_panel();
     refresh_guidance();
