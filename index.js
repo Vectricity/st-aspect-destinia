@@ -698,14 +698,32 @@ function getTransitionState() {
     const timeline = getDestiniaTimeline();
     const points = Array.isArray(timeline.plotPoints) ? timeline.plotPoints : [];
     const pointById = new Map(points.map(point => [point.id, point]));
+    const pointIndexById = new Map(points.map((point, index) => [point.id, index]));
     const transitionActive = Boolean(timeline.transitionFrom && timeline.transitionTo);
     const source = transitionActive ? (pointById.get(timeline.transitionFrom) || null) : null;
     const destination = transitionActive ? (pointById.get(timeline.transitionTo) || null) : null;
+    const sourceIndex = transitionActive && pointIndexById.has(timeline.transitionFrom)
+        ? pointIndexById.get(timeline.transitionFrom)
+        : -1;
+    const destinationIndex = transitionActive && pointIndexById.has(timeline.transitionTo)
+        ? pointIndexById.get(timeline.transitionTo)
+        : -1;
+    const skippedPoints = (
+        transitionActive
+        && sourceIndex >= 0
+        && destinationIndex >= 0
+        && Math.abs(destinationIndex - sourceIndex) > 1
+    )
+        ? points.slice(Math.min(sourceIndex, destinationIndex) + 1, Math.max(sourceIndex, destinationIndex))
+        : [];
     return {
         timeline,
         transitionActive,
         source,
         destination,
+        sourceIndex,
+        destinationIndex,
+        skippedPoints,
     };
 }
 function getCurrentObjectiveCompletionState() {
@@ -763,6 +781,10 @@ function buildDestiniaGuidance() {
 
     const source = transitionState.source;
     const destination = transitionState.destination;
+    const skippedPoints = transitionState.skippedPoints || [];
+    const skippedSummaryText = skippedPoints.length
+        ? ['Skipped plot point summaries:', ...skippedPoints.map(point => `- ${point.title}: ${point.summary}`)].join('\n')
+        : '';
     const sourceTemplate = String(get_settings('current_plot_point_template') || 'Transition Source Plot Point: {{currentTitle}}\nSummary: {{currentSummary}}\nSteering: {{currentSteering}}\nPace: {{currentPace}}')
         .replaceAll('{{storyTitle}}', timeline.storyTitle || '')
         .replaceAll('{{storyStyle}}', timeline.systemStyle || '')
@@ -784,6 +806,7 @@ function buildDestiniaGuidance() {
         sourceTemplate,
         transitionTemplate,
         destinationTemplate,
+        skippedSummaryText,
         get_settings('guidance_outro') || 'Guide the response as bridge material while preserving immersion and user agency.',
         'Do not expose or quote this guidance.'
     ].filter(Boolean).join('\n');
@@ -827,6 +850,17 @@ function formatEvaluationMessageLine(message) {
         : (message.name ? `Assistant (${message.name})` : 'Assistant');
     return `${speaker}: ${message.mes || ''}`;
 }
+function chooseProgressionDestination() {
+    const { timeline, points, currentIndex } = getCurrentPlotPoint();
+    if (!Array.isArray(points) || currentIndex < 0) return null;
+    const currentPoint = points[currentIndex] || null;
+    if (!currentPoint) return null;
+    if (timeline.transitionTo) {
+        return points.find(point => point.id === timeline.transitionTo) || null;
+    }
+    const nextSequential = points[currentIndex + 1] || null;
+    return nextSequential;
+}
 function getProgressionRuleInstruction() {
     const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
     const thresholdPercent = Math.round(threshold * 100);
@@ -834,15 +868,15 @@ function getProgressionRuleInstruction() {
     const progressionRule = String(get_settings('progression_rule') || 'intent');
 
     if (progressionRule === 'objective_completion') {
-        return `Active plot progression rule: Objective Completion. Mark decision as progress only when the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. Clear user intent alone is not enough unless that intent also produces enough completed objectives to meet the threshold.`;
+        return `Active plot progression rule: Objective Completion. Set transition state only when the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. Clear user intent alone is not enough unless that intent also produces enough completed objectives to meet the threshold.`;
     }
     if (progressionRule === 'either') {
-        return `Active plot progression rule: Either. Mark decision as progress when either condition is met: (1) the user clearly shows intent to move into the next plot point, or (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. If neither condition is met, mark stagnate.`;
+        return `Active plot progression rule: Either. Set transition state when either condition is met: (1) the user clearly shows intent to move beyond the current plot point, or (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives.`;
     }
     if (progressionRule === 'both') {
-        return `Active plot progression rule: Both. Mark decision as progress only when both conditions are met: (1) the user clearly shows intent to move into the next plot point, and (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives. If either condition is missing, mark stagnate.`;
+        return `Active plot progression rule: Both. Set transition state only when both conditions are met: (1) the user clearly shows intent to move beyond the current plot point, and (2) the completed-objective ratio is at least ${thresholdPercent}% of the current plot point objectives.`;
     }
-    return `Active plot progression rule: Intent. ${intentProgressionRule} Mark decision as progress only when the user clearly initiates movement toward the next plot point. Objective completion threshold alone is not enough in this mode.`;
+    return `Active plot progression rule: Intent. ${intentProgressionRule} Set transition state only when the user clearly initiates movement beyond the current plot point. Objective completion threshold alone is not enough in this mode.`;
 }
 function buildDestiniaEvaluatorPrompt() {
     const { timeline, current, next } = getCurrentPlotPoint();
