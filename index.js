@@ -3784,8 +3784,18 @@ function add_menu_button(text, fa_icon, callback, hover=null) {
     $button.appendTo($extensions_menu)
     $button.click(() => callback());
 }
+async function rerun_chat_evaluation() {
+    if (!chat_enabled() || !get_settings('dest_enabled')) {
+        toast('Aspect: Destinia is disabled for this chat.', 'warning');
+        return;
+    }
+    await evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
+    refresh_guidance();
+    update_all_message_visuals();
+}
 function initialize_menu_buttons() {
     add_menu_button(t`Toggle Guidance`, "fa-solid fa-route", toggle_chat_enabled, t`Toggle Aspect: Destinia guidance for the current chat.`)
+    add_menu_button(t`Rerun Evaluation`, "fa-solid fa-rotate-right", rerun_chat_evaluation, t`Rerun Aspect: Destinia evaluation for the current chat and refresh the diagnostic message.`)
 }
 
 
