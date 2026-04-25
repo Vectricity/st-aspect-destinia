@@ -850,17 +850,6 @@ function formatEvaluationMessageLine(message) {
         : (message.name ? `Assistant (${message.name})` : 'Assistant');
     return `${speaker}: ${message.mes || ''}`;
 }
-function chooseProgressionDestination() {
-    const { timeline, points, currentIndex } = getCurrentPlotPoint();
-    if (!Array.isArray(points) || currentIndex < 0) return null;
-    const currentPoint = points[currentIndex] || null;
-    if (!currentPoint) return null;
-    if (timeline.transitionTo) {
-        return points.find(point => point.id === timeline.transitionTo) || null;
-    }
-    const nextSequential = points[currentIndex + 1] || null;
-    return nextSequential;
-}
 function getProgressionRuleInstruction() {
     const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
     const thresholdPercent = Math.round(threshold * 100);
@@ -3252,9 +3241,8 @@ function auto_load_profile() {
 
 // UI functions
 function get_message_div(index) {
-    // given a message index, get the div element for that message
-    // it will have an attribute "mesid" that is the message index
-    let div = $(`div[mesid="${index}"]`);
+    // given a message index, get the rendered message element for that index
+    let div = $(`#chat .mes[mesid="${index}"]`);
     if (div.length === 0) {
         return null;
     }
