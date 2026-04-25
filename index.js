@@ -3493,7 +3493,6 @@ function refresh_guidance() {
         );
     }
 
-    update_all_message_visuals();
     return promptText;
 }
 const refresh_guidance_debounced = debounce(() => refresh_guidance(), debounce_timeout.relaxed);
