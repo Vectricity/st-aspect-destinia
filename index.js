@@ -441,11 +441,16 @@ function getChatLabel(ctx = getContext()) {
 function registerKnownChat() {
     const knownChats = get_settings('known_chats', true) || {};
     const key = getChatKey();
-    knownChats[key] = {
+    const previous = knownChats[key] || null;
+    const next = {
         key,
         label: getChatLabel(),
         lastSeen: Date.now(),
     };
+    if (previous && previous.label === next.label && Date.now() - Number(previous.lastSeen || 0) < 60000) {
+        return;
+    }
+    knownChats[key] = next;
     set_settings('known_chats', knownChats);
 }
 
@@ -625,20 +630,6 @@ function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
 
     const nextTimelineText = JSON.stringify(timeline, null, 2);
     set_settings('timeline_text', nextTimelineText);
-
-    const presetId = String(get_settings('selected_timeline_preset') || '').trim();
-    const presets = get_settings('timeline_presets', true) || {};
-    if (presetId && presets[presetId]) {
-        presets[presetId].timelineText = nextTimelineText;
-        set_settings('timeline_presets', presets);
-    }
-
-    const activeProfile = String(get_settings('profile') || '').trim();
-    const profiles = get_settings('profiles', true) || {};
-    if (activeProfile && profiles[activeProfile]) {
-        profiles[activeProfile].timeline_text = nextTimelineText;
-        set_settings('profiles', profiles);
-    }
 }
 function resetTimelineObjectivesToFalse() {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
@@ -661,20 +652,6 @@ function resetTimelineObjectivesToFalse() {
 
     const nextTimelineText = JSON.stringify(timeline, null, 2);
     set_settings('timeline_text', nextTimelineText);
-
-    const presetId = String(get_settings('selected_timeline_preset') || '').trim();
-    const presets = get_settings('timeline_presets', true) || {};
-    if (presetId && presets[presetId]) {
-        presets[presetId].timelineText = nextTimelineText;
-        set_settings('timeline_presets', presets);
-    }
-
-    const activeProfile = String(get_settings('profile') || '').trim();
-    const profiles = get_settings('profiles', true) || {};
-    if (activeProfile && profiles[activeProfile]) {
-        profiles[activeProfile].timeline_text = nextTimelineText;
-        set_settings('profiles', profiles);
-    }
 }
 function getCurrentPlotPoint() {
     const timeline = getDestiniaTimeline();
