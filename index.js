@@ -1093,6 +1093,13 @@ async function evaluateDestiniaProgress(targetMessage = null) {
 
         if (transitionState.transitionActive) {
             const completion = String(parsed?.decision || '').trim().toLowerCase();
+            trace_debug('EvaluateDestiniaProgress:transitionCompletionResult', {
+                decision: completion,
+                sourceId: transitionState.timeline.transitionFrom,
+                destinationId: transitionState.timeline.transitionTo,
+                sourceTitle: transitionState.source?.title || '',
+                destinationTitle: transitionState.destination?.title || '',
+            });
             const diagnostic = {
                 current_plot_title: transitionState.source?.title || '',
                 objective_completion: [],
@@ -1102,11 +1109,22 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             };
             if (completion === 'complete' && transitionState.destination) {
                 const timeline = getDestiniaTimeline();
+                trace_debug('TransitionStateWriteback:start', {
+                    previousCurrentPlotPoint: timeline.currentPlotPoint,
+                    previousTransitionFrom: timeline.transitionFrom,
+                    previousTransitionTo: timeline.transitionTo,
+                    destinationId: transitionState.destination.id,
+                });
                 timeline.currentPlotPoint = transitionState.destination.id;
                 timeline.transitionFrom = null;
                 timeline.transitionTo = null;
                 const nextTimelineText = JSON.stringify(timeline, null, 2);
                 set_settings('timeline_text', nextTimelineText);
+                trace_debug('TransitionStateWriteback:complete', {
+                    currentPlotPoint: timeline.currentPlotPoint,
+                    transitionFrom: timeline.transitionFrom,
+                    transitionTo: timeline.transitionTo,
+                });
                 diagnostic.did_advance = true;
             }
             if (resolvedTargetMessage) {
@@ -1123,6 +1141,12 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
         const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'progress' : 'stagnate';
         const { current, points, currentIndex } = getCurrentPlotPoint();
+        trace_debug('EvaluateDestiniaProgress:finishTriggerResult', {
+            decision,
+            rawDecision,
+            currentPlotPointId: current?.id || '',
+            currentPlotPointTitle: current?.title || '',
+        });
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
         const integratedObjectiveCompletion = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion.map(Boolean) : [];
@@ -1148,10 +1172,22 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         if (decision === 'progress' && currentIndex < points.length - 1) {
             const destination = points[currentIndex + 1];
             const timeline = getDestiniaTimeline();
+            trace_debug('TransitionStateWriteback:start', {
+                previousCurrentPlotPoint: timeline.currentPlotPoint,
+                previousTransitionFrom: timeline.transitionFrom,
+                previousTransitionTo: timeline.transitionTo,
+                sourceId: current?.id || null,
+                destinationId: destination?.id || null,
+            });
             timeline.transitionFrom = current?.id || null;
             timeline.transitionTo = destination?.id || null;
             const nextTimelineText = JSON.stringify(timeline, null, 2);
             set_settings('timeline_text', nextTimelineText);
+            trace_debug('TransitionStateWriteback:complete', {
+                currentPlotPoint: timeline.currentPlotPoint,
+                transitionFrom: timeline.transitionFrom,
+                transitionTo: timeline.transitionTo,
+            });
             diagnostic.did_advance = true;
         }
         if (resolvedTargetMessage) {
@@ -2558,6 +2594,12 @@ function stepPlotPoint(delta = 0) {
     const nextPoint = points[nextIndex];
     if (!nextPoint) return;
     const timeline = getDestiniaTimeline();
+    trace_debug('ManualPlotPointChange', {
+        action: 'step',
+        delta,
+        previousCurrentPlotPoint: timeline.currentPlotPoint,
+        nextCurrentPlotPoint: nextPoint.id,
+    });
     timeline.currentPlotPoint = nextPoint.id;
     timeline.transitionFrom = null;
     timeline.transitionTo = null;
@@ -2571,6 +2613,11 @@ function resetPlotPointToFirst() {
     const timeline = getDestiniaTimeline();
     const firstPoint = Array.isArray(timeline.plotPoints) ? timeline.plotPoints[0] : null;
     if (!firstPoint) return;
+    trace_debug('ManualPlotPointChange', {
+        action: 'reset_to_first',
+        previousCurrentPlotPoint: timeline.currentPlotPoint,
+        nextCurrentPlotPoint: firstPoint.id,
+    });
     timeline.currentPlotPoint = firstPoint.id;
     timeline.transitionFrom = null;
     timeline.transitionTo = null;
