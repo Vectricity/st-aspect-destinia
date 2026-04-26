@@ -1089,7 +1089,19 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             prompt,
             trimNames: false,
         });
-        const parsed = JSON.parse(String(response || '').trim());
+        let parsed;
+        try {
+            parsed = JSON.parse(String(response || '').trim());
+        } catch (parseError) {
+            trace_debug('EvaluateDestiniaProgress:parseFailure', {
+                transitionActive: transitionState.transitionActive,
+                responseType: typeof response,
+                responsePreview: String(response || '').slice(0, 1000),
+                parseErrorName: parseError?.name || '',
+                parseErrorMessage: parseError?.message || String(parseError || ''),
+            });
+            throw parseError;
+        }
 
         if (transitionState.transitionActive) {
             const completion = String(parsed?.decision || '').trim().toLowerCase();
@@ -1205,7 +1217,22 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         render_status_panel();
         return parsed;
     } catch (error) {
-        debug('Destinia evaluator failed', error);
+        trace_debug('EvaluateDestiniaProgress:error', {
+            transitionActive: transitionState.transitionActive,
+            targetIsUser: Boolean(resolvedTargetMessage?.is_user),
+            targetName: resolvedTargetMessage?.name || '',
+            evaluatorProfile,
+            evaluatorPreset,
+            errorName: error?.name || '',
+            errorMessage: error?.message || String(error || ''),
+            errorStack: error?.stack || '',
+        });
+        debug('Destinia evaluator failed', {
+            transitionActive: transitionState.transitionActive,
+            errorName: error?.name || '',
+            errorMessage: error?.message || String(error || ''),
+            errorStack: error?.stack || '',
+        });
         return null;
     } finally {
         active_diagnostic_loading_index = null;
