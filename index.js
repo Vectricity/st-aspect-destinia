@@ -917,7 +917,7 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
         let completed = false;
         let reason = '';
         try {
-            const parsed = JSON.parse(response);
+            const parsed = JSON.parse(stripJsonCodeFences(response));
             completed = Boolean(parsed?.completed);
             reason = String(parsed?.reason || '');
         } catch {
@@ -1091,12 +1091,13 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         });
         let parsed;
         try {
-            parsed = JSON.parse(String(response || '').trim());
+            parsed = JSON.parse(stripJsonCodeFences(String(response || '')));
         } catch (parseError) {
             trace_debug('EvaluateDestiniaProgress:parseFailure', {
                 transitionActive: transitionState.transitionActive,
                 responseType: typeof response,
                 responsePreview: String(response || '').slice(0, 1000),
+                strippedResponsePreview: stripJsonCodeFences(String(response || '')).slice(0, 1000),
                 parseErrorName: parseError?.name || '',
                 parseErrorMessage: parseError?.message || String(parseError || ''),
             });
@@ -1263,6 +1264,14 @@ function clean_string_for_html(text) {
             case ">": return "&gt;";
         }
     })
+}
+function stripJsonCodeFences(text) {
+    const raw = String(text || '').trim();
+    const fencedMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (fencedMatch) {
+        return String(fencedMatch[1] || '').trim();
+    }
+    return raw;
 }
 function hasBalancedTemplateDelimiters(value) {
     const text = String(value || '');
