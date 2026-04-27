@@ -47,6 +47,9 @@ const LABEL_HELP = Object.freeze({
     evaluator_chat_completion_preset: 'Which completion preset the separate evaluator request uses.',
     recent_messages_to_evaluate: 'How many recent chat messages are included in evaluator evidence.',
     messages_evaluated: 'Which message types are included in evaluator evidence (`User`, `Assistant`, or `Both`).',
+    evaluation_cooldown_enabled: 'When enabled, enforces a minimum gap between evaluator requests to reduce burst traffic and rate-limit errors.',
+    evaluation_cooldown_seconds: 'The minimum number of seconds to wait between evaluator requests when cooldown is enabled.',
+    evaluation_delay_seconds: 'How long to wait after the assistant response finishes before starting evaluation.',
     timeline: 'The editable JSON source of truth for live story structure, plot points, objectives, and transitions.',
     timeline_preset: 'A saved timeline snapshot that can be selected, overwritten, duplicated, imported, or exported.',
     reset: 'Restore a field to its in-code default value.',
@@ -274,6 +277,9 @@ const default_settings = {
     progression_rule: 'objective_completion',
     foreshadow_next_plot_point: true,
     messages_evaluated: 'both',
+    evaluation_cooldown_enabled: false,
+    evaluation_cooldown_seconds: 10,
+    evaluation_delay_seconds: 2,
     timeline_deviation_allowed: false,
     auto_resolve_deviation: false,
     detach_enabled: false,
@@ -327,6 +333,9 @@ let debug_log_entries = [];
 let active_diagnostic_loading_index = null;
 let active_diagnostic_loading_started_at = 0;
 let finishing_diagnostic_index = null;
+let lastEvaluationStartedAt = 0;
+let scheduledEvaluationSequence = 0;
+let scheduledEvaluationTask = Promise.resolve(null);
 function append_debug_log(level, args) {
     const entry = {
         timestamp: new Date().toISOString(),
@@ -586,26 +595,93 @@ function getValidatedTimelineText(rawText) {
         };
     }
 }
+const EVALUATOR_OBJECTIVE_BASE_RULE = 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.';
+
+const EVALUATOR_OBJECTIVE_EVIDENCE_RULE = 'Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.';
+
+function removeRepeatedExactText(text, needle) {
+    text = String(text || '');
+    needle = String(needle || '');
+    if (!needle) return text;
+
+    const firstIndex = text.indexOf(needle);
+    if (firstIndex < 0) return text;
+
+    const keepEnd = firstIndex + needle.length;
+    const beforeAndFirst = text.slice(0, keepEnd);
+    const afterFirst = text.slice(keepEnd).split(needle).join('');
+
+    return `${beforeAndFirst}${afterFirst}`;
+}
+
+function normalizeEvaluatorPromptSchema(rawPrompt = '') {
+    let prompt = String(rawPrompt || '').trim();
+
+    if (!prompt) {
+        prompt = DEFAULT_EVALUATOR_PROMPT;
+    }
+
+    prompt = prompt
+        .replaceAll(
+            'that the USER is signaling that the story should stay on the current plot point or may transition toward the next plot point.',
+            'whether the conversation should stagnate on the current plot point or progress toward the next plot point.'
+        )
+        .replaceAll(
+            'Only mark objectives complete when the USER meaningfully demonstrates progress. Do not mark completion based only on assistant or NPC narration or dialogue.',
+            EVALUATOR_OBJECTIVE_BASE_RULE
+        )
+        .replaceAll(
+            'Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-plot-point task, or is engaged in an important unresolved conversation.',
+            'Only mark plot_stagnation as true when the conversation clearly supports remaining on the current plot point, such as explicit requests to delay progression, clearly unfinished in-plot-point work, or an important unresolved conversation that should continue before progressing.'
+        )
+        .replaceAll('"decision": "stay" | "advance",', '"decision": "stagnate" | "progress",')
+        .replaceAll('"user_wants_to_linger": true', '"plot_stagnation": true')
+        .replaceAll(
+            'Recent user/assistant chat selected for evaluation:\n{{recentChat}}\nRecent user-only chat (when present in the evaluation scope):\n{{recentUserChat}}',
+            'Recent chat selected for evaluation:\n{{recentChat}}'
+        )
+        .replaceAll(
+            'Recent user chat:\n{{recentUserChat}}\nRecent chat:\n{{recentChat}}',
+            'Recent chat selected for evaluation:\n{{recentChat}}'
+        )
+        .replaceAll('Recent user chat:', 'Recent chat selected for evaluation:');
+
+    // Repair already-corrupted saved profiles by preserving only the first exact evidence rule.
+    prompt = removeRepeatedExactText(prompt, EVALUATOR_OBJECTIVE_EVIDENCE_RULE);
+
+    // Upgrade legacy prompts once, without making future loads mutate the prompt again.
+    if (prompt.includes(EVALUATOR_OBJECTIVE_BASE_RULE) && !prompt.includes(EVALUATOR_OBJECTIVE_EVIDENCE_RULE)) {
+        prompt = prompt.replace(
+            EVALUATOR_OBJECTIVE_BASE_RULE,
+            `${EVALUATOR_OBJECTIVE_BASE_RULE}\n${EVALUATOR_OBJECTIVE_EVIDENCE_RULE}`
+        );
+    }
+
+    // Safety pass after migration.
+    prompt = removeRepeatedExactText(prompt, EVALUATOR_OBJECTIVE_EVIDENCE_RULE);
+
+    // If the prompt is from an old incompatible schema, replace it with the current canonical schema.
+    if (!prompt.includes('"objective_reasons"')) {
+        prompt = DEFAULT_EVALUATOR_PROMPT;
+    }
+
+    return prompt
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function normalizeImportedProfile(data = {}) {
     const normalized = Object.assign(structuredClone(default_settings), structuredClone(data || {}));
+
     if (!('messages_evaluated' in normalized)) {
         normalized.messages_evaluated = normalized.include_user_messages_in_evaluation === false ? 'assistant' : 'both';
     }
-    normalized.evaluator_prompt = String(normalized.evaluator_prompt || '')
-        .replaceAll('that the USER is signaling that the story should stay on the current plot point or may transition toward the next plot point.', 'whether the conversation should stagnate on the current plot point or progress toward the next plot point.')
-        .replaceAll('Only mark objectives complete when the USER meaningfully demonstrates progress. Do not mark completion based only on assistant or NPC narration or dialogue.', 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.')
-        .replaceAll('Only mark user_wants_to_linger as true when the user explicitly asks to delay progression, is clearly still working an unfinished in-plot-point task, or is engaged in an important unresolved conversation.', 'Only mark plot_stagnation as true when the conversation clearly supports remaining on the current plot point, such as explicit requests to delay progression, clearly unfinished in-plot-point work, or an important unresolved conversation that should continue before progressing.')
-        .replaceAll('"decision": "stay" | "advance",', '"decision": "stagnate" | "progress",')
-        .replaceAll('"user_wants_to_linger": true', '"plot_stagnation": true')
-        .replaceAll('Recent user/assistant chat selected for evaluation:\n{{recentChat}}\nRecent user-only chat (when present in the evaluation scope):\n{{recentUserChat}}', 'Recent chat selected for evaluation:\n{{recentChat}}')
-        .replaceAll('Recent user chat:\n{{recentUserChat}}\nRecent chat:\n{{recentChat}}', 'Recent chat selected for evaluation:\n{{recentChat}}')
-        .replaceAll('Recent user chat:', 'Recent chat selected for evaluation:')
-        .replaceAll('Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.', 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone. Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.');
-    if (!normalized.evaluator_prompt.includes('"objective_reasons"')) {
-        normalized.evaluator_prompt = DEFAULT_EVALUATOR_PROMPT;
-    }
+
+    normalized.evaluator_prompt = normalizeEvaluatorPromptSchema(normalized.evaluator_prompt);
+
     const timelineResult = getValidatedTimelineText(normalized.timeline_text);
     normalized.timeline_text = timelineResult.timelineText;
+
     return normalized;
 }
 function getDestiniaTimeline() {
@@ -791,35 +867,51 @@ function buildDestiniaGuidance() {
 function getMessagesEvaluatedMode() {
     return get_settings('messages_evaluated') || 'both';
 }
-function getRecentEvaluationContext() {
+
+function getRecentEvaluationContext(options = {}) {
+    const shouldTrace = options.trace !== false;
+
     if (selected_group) {
-        const { recentChat, recentUserChat } = getGroupEvaluationContext();
-        return {
-            recentChat,
-            recentUserChat,
-        };
+        return getGroupEvaluationContext({ trace: shouldTrace });
     }
+
     const recentChatSource = (getContext().chat || []).slice(-Math.max(1, Number(get_settings('intent_window')) || 8));
     const messagesEvaluated = getMessagesEvaluatedMode();
+
     let recentChat = recentChatSource;
     if (messagesEvaluated === 'user') {
         recentChat = recentChatSource.filter(message => message?.is_user);
     } else if (messagesEvaluated === 'assistant') {
         recentChat = recentChatSource.filter(message => !message?.is_user);
     }
+
     const recentUserChat = recentChatSource.filter(message => message?.is_user);
-    trace_debug('EvaluatorContext', {
+
+    const evaluationContext = {
         mode: messagesEvaluated,
-        totalRecentMessages: recentChatSource.length,
-        evaluatedMessages: recentChat.length,
-        userMessagesAvailable: recentUserChat.length,
-        evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
-    });
-    return {
         recentChat,
         recentUserChat,
+        assistantBatch: recentChat.filter(message => !message?.is_user),
+        targetMessage: recentChat[recentChat.length - 1] || null,
+        generationId: null,
+        turnStartIndex: null,
+        firstBatchIndex: null,
+        lastBatchIndex: null,
     };
+
+    if (shouldTrace) {
+        trace_debug('EvaluatorContext', {
+            mode: evaluationContext.mode,
+            totalRecentMessages: recentChatSource.length,
+            evaluatedMessages: evaluationContext.recentChat.length,
+            userMessagesAvailable: evaluationContext.recentUserChat.length,
+            evaluatedCharacters: evaluationContext.recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
+        });
+    }
+
+    return evaluationContext;
 }
+
 function formatEvaluationMessageLine(message) {
     if (!message) return '';
     const speaker = message.is_user
@@ -827,6 +919,7 @@ function formatEvaluationMessageLine(message) {
         : (message.name ? `Assistant (${message.name})` : 'Assistant');
     return `${speaker}: ${message.mes || ''}`;
 }
+
 function getProgressionRuleInstruction() {
     const threshold = Number(get_settings('objective_auto_advance_threshold')) || 0;
     const thresholdPercent = Math.round(threshold * 100);
@@ -844,11 +937,23 @@ function getProgressionRuleInstruction() {
     }
     return `Active plot progression rule: Intent. ${intentProgressionRule} Set transition state only when the user clearly initiates movement beyond the current plot point. Objective completion threshold alone is not enough in this mode.`;
 }
-function buildDestiniaEvaluatorPrompt() {
+
+function applyTemplateTokens(template, replacements = {}) {
+    let result = String(template || '');
+    for (const [token, value] of Object.entries(replacements)) {
+        result = result.replaceAll(token, value ?? '');
+    }
+    return result;
+}
+
+function buildDestiniaEvaluatorPrompt(evaluationContext = null) {
     const { timeline, current, next } = getCurrentPlotPoint();
     if (!current) return '';
-    const { recentChat } = getRecentEvaluationContext();
-    const replace = {
+
+    const contextForEvaluation = evaluationContext || getRecentEvaluationContext({ trace: true });
+    const recentChatText = contextForEvaluation.recentChat.map(formatEvaluationMessageLine).join('\n');
+
+    return applyTemplateTokens(get_settings('evaluator_prompt') || DEFAULT_EVALUATOR_PROMPT, {
         '{{storyTitle}}': timeline.storyTitle,
         '{{storyStyle}}': timeline.systemStyle,
         '{{currentTitle}}': current.title,
@@ -858,21 +963,21 @@ function buildDestiniaEvaluatorPrompt() {
         '{{objectiveCompletionTriggerThreshold}}': String(Number(get_settings('objective_auto_advance_threshold')) || 0),
         '{{nextTitle}}': next?.title || 'None',
         '{{nextSummary}}': next?.summary || 'None',
-        '{{recentChat}}': recentChat.map(formatEvaluationMessageLine).join('\n'),
+        '{{recentChat}}': recentChatText,
         '{{objectiveCompletionGuidance}}': get_settings('objective_completion_guidance') || 'Only mark objective completion when the user meaningfully demonstrates progress relevant to the current plot point.',
         '{{progressionRuleInstruction}}': getProgressionRuleInstruction(),
-    };
-    let prompt = String(get_settings('evaluator_prompt') || DEFAULT_EVALUATOR_PROMPT);
-    for (const [token, value] of Object.entries(replace)) {
-        prompt = prompt.replaceAll(token, value);
-    }
-    return prompt;
+    });
 }
-function buildTransitionCompletionPrompt() {
-    const { timeline, source, destination } = getTransitionState();
+
+function buildTransitionCompletionPrompt(evaluationContext = null, transitionStateOverride = null) {
+    const transitionState = transitionStateOverride || getTransitionState();
+    const { timeline, source, destination } = transitionState;
     if (!source || !destination) return '';
-    const { recentChat } = getRecentEvaluationContext();
-    const replace = {
+
+    const contextForEvaluation = evaluationContext || getRecentEvaluationContext({ trace: true });
+    const recentChatText = contextForEvaluation.recentChat.map(formatEvaluationMessageLine).join('\n');
+
+    return applyTemplateTokens(DEFAULT_TRANSITION_COMPLETION_PROMPT, {
         '{{storyTitle}}': timeline.storyTitle,
         '{{storyStyle}}': timeline.systemStyle,
         '{{sourceTitle}}': source.title,
@@ -880,18 +985,14 @@ function buildTransitionCompletionPrompt() {
         '{{destinationTitle}}': destination.title,
         '{{destinationSummary}}': destination.summary,
         '{{transitionGuidance}}': source.transitionGuidance || '',
-        '{{recentChat}}': recentChat.map(formatEvaluationMessageLine).join('\n'),
-    };
-    let prompt = DEFAULT_TRANSITION_COMPLETION_PROMPT;
-    for (const [token, value] of Object.entries(replace)) {
-        prompt = prompt.replaceAll(token, value);
-    }
-    return prompt;
+        '{{recentChat}}': recentChatText,
+    });
 }
-async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = []) {
+
+async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [], evaluationContext = null) {
     const { timeline, current } = getCurrentPlotPoint();
-    const { recentChat } = getRecentEvaluationContext();
-    const recentChatText = recentChat.map(formatEvaluationMessageLine).join('\n');
+    const contextForEvaluation = evaluationContext || getRecentEvaluationContext({ trace: true });
+    const recentChatText = contextForEvaluation.recentChat.map(formatEvaluationMessageLine).join('\n');
     const guidance = get_settings('objective_completion_guidance') || 'Only mark objective completion when the conversation meaningfully demonstrates progress relevant to the current plot point.';
     const results = [];
 
@@ -913,9 +1014,11 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
             'Recent chat selected for evaluation:',
             recentChatText,
         ].join('\n');
+
         const response = String(await generateQuietPrompt(prompt, false, false) || '').trim();
         let completed = false;
         let reason = '';
+
         try {
             const parsed = JSON.parse(stripJsonCodeFences(response));
             completed = Boolean(parsed?.completed);
@@ -925,13 +1028,16 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
             completed = lowered.includes('true') && !lowered.includes('false');
             reason = response;
         }
+
         results.push({ completed, reason });
     }
 
     return results;
 }
+
 let lastEvaluationKey = '';
 let pendingGroupUserEvaluationIndex = null;
+
 function getLastGroupGenerationId() {
     const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
     for (let index = chat.length - 1; index >= 0; index -= 1) {
@@ -943,17 +1049,40 @@ function getLastGroupGenerationId() {
     }
     return null;
 }
-function getGroupEvaluationContext() {
+
+function getGroupEvaluationContext(options = {}) {
+    const shouldTrace = options.trace !== false;
     const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
     const generationId = getLastGroupGenerationId();
+
     if (generationId === null) {
-        return {
+        const emptyContext = {
+            mode: getMessagesEvaluatedMode(),
             recentChat: [],
             recentUserChat: [],
             assistantBatch: [],
             targetMessage: null,
             generationId: null,
+            turnStartIndex: null,
+            firstBatchIndex: null,
+            lastBatchIndex: null,
         };
+
+        if (shouldTrace) {
+            trace_debug('EvaluatorContext', {
+                mode: emptyContext.mode,
+                generationId: null,
+                turnStartIndex: null,
+                firstBatchIndex: null,
+                lastBatchIndex: null,
+                assistantBatchMessages: 0,
+                userMessagesAvailable: 0,
+                evaluatedMessages: 0,
+                evaluatedCharacters: 0,
+            });
+        }
+
+        return emptyContext;
     }
 
     const assistantBatchIndexes = [];
@@ -982,33 +1111,46 @@ function getGroupEvaluationContext() {
     const turnMessages = firstBatchIndex >= 0 && lastBatchIndex >= firstBatchIndex
         ? chat.slice(turnStartIndex, lastBatchIndex + 1)
         : assistantBatch;
+
     const recentUserChat = turnMessages.filter(message => message?.is_user);
     const mode = getMessagesEvaluatedMode();
+
     let recentChat = assistantBatch;
     if (mode === 'user') {
         recentChat = recentUserChat;
     } else if (mode === 'both') {
         recentChat = turnMessages;
     }
-    trace_debug('EvaluatorContext', {
+
+    const evaluationContext = {
         mode,
-        generationId,
-        turnStartIndex,
-        firstBatchIndex,
-        lastBatchIndex,
-        assistantBatchMessages: assistantBatch.length,
-        userMessagesAvailable: recentUserChat.length,
-        evaluatedMessages: recentChat.length,
-        evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
-    });
-    return {
         recentChat,
         recentUserChat,
         assistantBatch,
         targetMessage,
         generationId,
+        turnStartIndex,
+        firstBatchIndex,
+        lastBatchIndex,
     };
+
+    if (shouldTrace) {
+        trace_debug('EvaluatorContext', {
+            mode,
+            generationId,
+            turnStartIndex,
+            firstBatchIndex,
+            lastBatchIndex,
+            assistantBatchMessages: assistantBatch.length,
+            userMessagesAvailable: recentUserChat.length,
+            evaluatedMessages: recentChat.length,
+            evaluatedCharacters: recentChat.reduce((sum, message) => sum + String(message?.mes || '').length, 0),
+        });
+    }
+
+    return evaluationContext;
 }
+
 async function waitForEvaluationReady() {
     try {
         await waitUntilCondition(() => !streamingProcessor || streamingProcessor.isFinished, 15000, 100);
@@ -1018,10 +1160,53 @@ async function waitForEvaluationReady() {
     }
     return true;
 }
-function getGroupEvaluationTargetMessage() {
+
+function getEvaluationDelayMs() {
+    const configured = Number(get_settings('evaluation_delay_seconds'));
+    if (!Number.isFinite(configured)) return 2000;
+    return Math.max(0, Math.round(configured * 1000));
+}
+
+function getEvaluationCooldownMs() {
+    if (!get_settings('evaluation_cooldown_enabled')) return 0;
+    const configured = Number(get_settings('evaluation_cooldown_seconds'));
+    if (!Number.isFinite(configured)) return 0;
+    return Math.max(0, Math.round(configured * 1000));
+}
+
+async function scheduleDestiniaEvaluation(targetMessage = null) {
+    const sequence = ++scheduledEvaluationSequence;
+    scheduledEvaluationTask = (async () => {
+        const evaluationDelayMs = getEvaluationDelayMs();
+        if (evaluationDelayMs > 0) {
+            await delay(evaluationDelayMs);
+            if (sequence !== scheduledEvaluationSequence) {
+                debug('Skipping superseded scheduled Destinia evaluation during delay window');
+                return null;
+            }
+        }
+
+        const cooldownMs = getEvaluationCooldownMs();
+        const waitMs = cooldownMs > 0 ? Math.max(0, (lastEvaluationStartedAt + cooldownMs) - Date.now()) : 0;
+        if (waitMs > 0) {
+            await delay(waitMs);
+            if (sequence !== scheduledEvaluationSequence) {
+                debug('Skipping superseded scheduled Destinia evaluation during cooldown window');
+                return null;
+            }
+        }
+
+        lastEvaluationStartedAt = Date.now();
+        return evaluateDestiniaProgress(targetMessage);
+    })();
+    return scheduledEvaluationTask;
+}
+
+function getGroupEvaluationTargetMessage(evaluationContext = null) {
     const context = getContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
     if (!chat.length) return null;
+
     const mode = getMessagesEvaluatedMode();
 
     if (mode === 'user') {
@@ -1035,47 +1220,67 @@ function getGroupEvaluationTargetMessage() {
         return null;
     }
 
-    const { targetMessage } = getGroupEvaluationContext();
-    return targetMessage;
+    if (evaluationContext?.targetMessage) {
+        return evaluationContext.targetMessage;
+    }
+
+    return getGroupEvaluationContext({ trace: false }).targetMessage;
 }
-function buildEvaluationKey(targetMessage = null) {
+
+function buildEvaluationKey(targetMessage = null, evaluationContext = null) {
     const context = getContext();
-    const { recentChat } = getRecentEvaluationContext();
-    const evidenceText = recentChat.map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`).join('\n');
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    const contextForEvaluation = evaluationContext || getRecentEvaluationContext({ trace: false });
+    const evidenceText = contextForEvaluation.recentChat
+        .map(message => `${message?.is_user ? 'U' : 'A'}:${message?.mes || ''}`)
+        .join('\n');
+
     return JSON.stringify({
         mode: getMessagesEvaluatedMode(),
         progressionRule: get_settings('progression_rule'),
         objectiveThreshold: get_settings('objective_auto_advance_threshold'),
         objectiveMethod: get_settings('objective_evaluation_method'),
         timelineHash: getStringHash(get_settings('timeline_text') || ''),
-        targetMessageId: targetMessage ? context.chat.indexOf(targetMessage) : -1,
+        targetMessageId: targetMessage ? chat.indexOf(targetMessage) : -1,
         evidenceHash: getStringHash(evidenceText),
     });
 }
+
 async function evaluateDestiniaProgress(targetMessage = null) {
     if (!chat_enabled() || !get_settings('dest_enabled')) return null;
     if (!(await waitForEvaluationReady())) return null;
-    const resolvedTargetMessage = targetMessage || getGroupEvaluationTargetMessage();
-    const evaluationKey = buildEvaluationKey(resolvedTargetMessage);
+
+    lastEvaluationStartedAt = Date.now();
+
+    const evaluationContext = getRecentEvaluationContext({ trace: true });
+    const resolvedTargetMessage = targetMessage || getGroupEvaluationTargetMessage(evaluationContext);
+    const evaluationKey = buildEvaluationKey(resolvedTargetMessage, evaluationContext);
+
     if (evaluationKey === lastEvaluationKey) {
         debug('Skipping duplicate Destinia evaluation for unchanged evidence');
         return null;
     }
+
     const transitionState = getTransitionState();
     const prompt = transitionState.transitionActive
-        ? buildTransitionCompletionPrompt()
-        : buildDestiniaEvaluatorPrompt();
+        ? buildTransitionCompletionPrompt(evaluationContext, transitionState)
+        : buildDestiniaEvaluatorPrompt(evaluationContext);
+
     if (!prompt) return null;
+
     const evaluatorPreset = get_settings('evaluator_preset');
     const evaluatorProfile = get_settings('evaluator_connection_profile');
     const currentPreset = await get_current_preset();
     const currentProfile = await get_current_connection_profile();
+
     try {
         await set_connection_profile(evaluatorProfile);
         await set_preset(evaluatorPreset);
+
         active_diagnostic_loading_index = resolvedTargetMessage ? getContext().chat.indexOf(resolvedTargetMessage) : null;
         active_diagnostic_loading_started_at = Date.now();
         update_all_message_visuals();
+
         trace_debug('EvaluateDestiniaProgress:start', {
             targetIsUser: Boolean(resolvedTargetMessage?.is_user),
             targetName: resolvedTargetMessage?.name || '',
@@ -1085,10 +1290,12 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             promptPreview: prompt.slice(0, 300),
             transitionActive: transitionState.transitionActive,
         });
+
         const response = await generateRaw({
             prompt,
             trimNames: false,
         });
+
         let parsed;
         try {
             parsed = JSON.parse(stripJsonCodeFences(String(response || '')));
@@ -1106,6 +1313,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
 
         if (transitionState.transitionActive) {
             const completion = String(parsed?.decision || '').trim().toLowerCase();
+
             trace_debug('EvaluateDestiniaProgress:transitionCompletionResult', {
                 decision: completion,
                 sourceId: transitionState.timeline.transitionFrom,
@@ -1113,6 +1321,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
                 sourceTitle: transitionState.source?.title || '',
                 destinationTitle: transitionState.destination?.title || '',
             });
+
             const diagnostic = {
                 current_plot_title: transitionState.source?.title || '',
                 objective_completion: [],
@@ -1120,32 +1329,40 @@ async function evaluateDestiniaProgress(targetMessage = null) {
                 objective_reasons: [],
                 did_advance: false,
             };
+
             if (completion === 'complete' && transitionState.destination) {
                 const timeline = getDestiniaTimeline();
+
                 trace_debug('TransitionStateWriteback:start', {
                     previousCurrentPlotPoint: timeline.currentPlotPoint,
                     previousTransitionFrom: timeline.transitionFrom,
                     previousTransitionTo: timeline.transitionTo,
                     destinationId: transitionState.destination.id,
                 });
+
                 timeline.currentPlotPoint = transitionState.destination.id;
                 timeline.transitionFrom = null;
                 timeline.transitionTo = null;
+
                 const nextTimelineText = JSON.stringify(timeline, null, 2);
                 set_settings('timeline_text', nextTimelineText);
+
                 trace_debug('TransitionStateWriteback:complete', {
                     currentPlotPoint: timeline.currentPlotPoint,
                     transitionFrom: timeline.transitionFrom,
                     transitionTo: timeline.transitionTo,
                 });
+
                 diagnostic.did_advance = true;
             }
+
             if (resolvedTargetMessage) {
                 const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
                 set_data(resolvedTargetMessage, 'current_plot_title', transitionState.source?.title || '');
                 set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
                 finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
             }
+
             lastEvaluationKey = evaluationKey;
             render_status_panel();
             return parsed;
@@ -1154,27 +1371,33 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
         const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'progress' : 'stagnate';
         const { current, points, currentIndex } = getCurrentPlotPoint();
+
         trace_debug('EvaluateDestiniaProgress:finishTriggerResult', {
             decision,
             rawDecision,
             currentPlotPointId: current?.id || '',
             currentPlotPointTitle: current?.title || '',
         });
+
         const currentObjectives = Array.isArray(current?.objectives) ? current.objectives : [];
         const objectiveEvaluationMethod = get_settings('objective_evaluation_method') || 'integrated';
         const integratedObjectiveCompletion = Array.isArray(parsed?.objective_completion) ? parsed.objective_completion.map(Boolean) : [];
         const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '')) : [];
+
         const objectiveResults = objectiveEvaluationMethod === 'per_objective'
-            ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives)
+            ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives, evaluationContext)
             : currentObjectives.map((objective, index) => ({
                 completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
                 reason: integratedObjectiveReasons[index] || '',
             }));
+
         const objectiveCompletion = currentObjectives.map((objective, index) => {
             const persisted = typeof objective?.completed === 'boolean' ? objective.completed : false;
             return Boolean(objectiveResults[index]?.completed ?? persisted);
         });
+
         persistObjectiveCompletionToTimeline(objectiveCompletion);
+
         const diagnostic = {
             current_plot_title: current?.title || '',
             objective_completion: objectiveCompletion,
@@ -1182,9 +1405,11 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             objective_reasons: objectiveResults.map((result) => String(result?.reason || '')),
             did_advance: false,
         };
+
         if (decision === 'progress' && currentIndex < points.length - 1) {
             const destination = points[currentIndex + 1];
             const timeline = getDestiniaTimeline();
+
             trace_debug('TransitionStateWriteback:start', {
                 previousCurrentPlotPoint: timeline.currentPlotPoint,
                 previousTransitionFrom: timeline.transitionFrom,
@@ -1192,28 +1417,35 @@ async function evaluateDestiniaProgress(targetMessage = null) {
                 sourceId: current?.id || null,
                 destinationId: destination?.id || null,
             });
+
             timeline.transitionFrom = current?.id || null;
             timeline.transitionTo = destination?.id || null;
+
             const nextTimelineText = JSON.stringify(timeline, null, 2);
             set_settings('timeline_text', nextTimelineText);
+
             trace_debug('TransitionStateWriteback:complete', {
                 currentPlotPoint: timeline.currentPlotPoint,
                 transitionFrom: timeline.transitionFrom,
                 transitionTo: timeline.transitionTo,
             });
+
             diagnostic.did_advance = true;
         }
+
         if (resolvedTargetMessage) {
             const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
             set_data(resolvedTargetMessage, 'current_plot_title', current?.title || '');
             set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
             finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
+
             trace_debug('EvaluateDestiniaProgress:attached', {
                 targetIsUser: Boolean(resolvedTargetMessage?.is_user),
                 targetName: resolvedTargetMessage?.name || '',
                 objectiveCompletion,
             });
         }
+
         lastEvaluationKey = evaluationKey;
         render_status_panel();
         return parsed;
@@ -1228,22 +1460,26 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             errorMessage: error?.message || String(error || ''),
             errorStack: error?.stack || '',
         });
+
         debug('Destinia evaluator failed', {
             transitionActive: transitionState.transitionActive,
             errorName: error?.name || '',
             errorMessage: error?.message || String(error || ''),
             errorStack: error?.stack || '',
         });
+
         return null;
     } finally {
         active_diagnostic_loading_index = null;
         active_diagnostic_loading_started_at = 0;
         pendingGroupUserEvaluationIndex = null;
         update_all_message_visuals();
+
         setTimeout(() => {
             finishing_diagnostic_index = null;
             update_all_message_visuals();
         }, 1500);
+
         await set_connection_profile(currentProfile);
         await set_preset(currentPreset);
     }
@@ -1328,16 +1564,28 @@ function format_percent(value) {
     return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 function update_slider_displays() {
-    const pairs = [
+    const percentPairs = [
         ['#strictness', '#strictness_value'],
         ['#pacing_bias', '#pacing_bias_value'],
         ['#objective_auto_advance_threshold', '#objective_auto_advance_threshold_value'],
     ];
-    for (const [inputSelector, valueSelector] of pairs) {
+    for (const [inputSelector, valueSelector] of percentPairs) {
         const input = document.querySelector(`.${settings_content_class} ${inputSelector}`);
         const output = document.querySelector(`.${settings_content_class} ${valueSelector}`);
         if (input && output) {
             output.textContent = format_percent(input.value);
+        }
+    }
+
+    const secondsPairs = [
+        ['#evaluation_cooldown_seconds', '#evaluation_cooldown_seconds_value'],
+        ['#evaluation_delay_seconds', '#evaluation_delay_seconds_value'],
+    ];
+    for (const [inputSelector, valueSelector] of secondsPairs) {
+        const input = document.querySelector(`.${settings_content_class} ${inputSelector}`);
+        const output = document.querySelector(`.${settings_content_class} ${valueSelector}`);
+        if (input && output) {
+            output.textContent = `${Number(input.value).toFixed(1)}s`;
         }
     }
 }
@@ -1370,6 +1618,8 @@ const FIELD_DEFAULTS = {
     strictness: () => default_settings.strictness,
     pacing_bias: () => default_settings.pacing_bias,
     objective_auto_advance_threshold: () => default_settings.objective_auto_advance_threshold,
+    evaluation_cooldown_seconds: () => default_settings.evaluation_cooldown_seconds,
+    evaluation_delay_seconds: () => default_settings.evaluation_delay_seconds,
 };
 function resetFieldToDefault(fieldId) {
     const factory = FIELD_DEFAULTS[fieldId];
@@ -1480,6 +1730,12 @@ function addInfoTipsToSettings() {
     appendInfoTip(recentMessagesLabel, 'recent_messages_to_evaluate', 'Explain Recent Messages to Evaluate');
     const messagesEvaluatedLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Messages Evaluated');
     appendInfoTip(messagesEvaluatedLabel, 'messages_evaluated', 'Explain Messages Evaluated');
+    const evaluationCooldownEnabledLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Evaluation Cooldown');
+    appendInfoTip(evaluationCooldownEnabledLabel, 'evaluation_cooldown_enabled', 'Explain Evaluation Cooldown');
+    const evaluationCooldownSecondsLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Cooldown Seconds');
+    appendInfoTip(evaluationCooldownSecondsLabel, 'evaluation_cooldown_seconds', 'Explain Cooldown Seconds');
+    const evaluationDelaySecondsLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Post-Response Delay');
+    appendInfoTip(evaluationDelaySecondsLabel, 'evaluation_delay_seconds', 'Explain Post-Response Delay');
     const timelineTitle = Array.from(root.querySelectorAll('.aspect-destinia-section-title')).find((element) => element.textContent.trim() === 'Timeline');
     appendInfoTip(timelineTitle, 'timeline', 'Explain Timeline');
     const timelinePresetLabel = Array.from(root.querySelectorAll('.aspect-destinia-label')).find((element) => element.textContent.trim() === 'Timeline Preset');
@@ -3602,7 +3858,7 @@ async function on_chat_event(event=null, data=null) {
             }
             if (getMessagesEvaluatedMode() === 'user') {
                 const userMessage = context.chat?.[typeof index === 'number' ? index : context.chat.length - 1] || context.chat?.[context.chat.length - 1] || null;
-                await evaluateDestiniaProgress(userMessage);
+                await scheduleDestiniaEvaluation(userMessage);
             }
             refresh_guidance();
             break;
@@ -3617,7 +3873,7 @@ async function on_chat_event(event=null, data=null) {
                 const mode = getMessagesEvaluatedMode();
                 if (mode === 'assistant' || mode === 'both') {
                     const assistantMessage = context.chat?.[index] || null;
-                    await evaluateDestiniaProgress(assistantMessage);
+                    await scheduleDestiniaEvaluation(assistantMessage);
                 }
             }
             refresh_guidance();
@@ -3677,6 +3933,9 @@ function initialize_settings_listeners() {
     bind_setting('#pacing_bias', 'pacing_bias', 'number');
     bind_setting('#objective_auto_advance_threshold', 'objective_auto_advance_threshold', 'number');
     bind_setting('#objective_evaluation_method', 'objective_evaluation_method', 'text');
+    bind_setting('#evaluation_cooldown_enabled', 'evaluation_cooldown_enabled', 'boolean');
+    bind_setting('#evaluation_cooldown_seconds', 'evaluation_cooldown_seconds', 'number');
+    bind_setting('#evaluation_delay_seconds', 'evaluation_delay_seconds', 'number');
     bind_setting('#intent_window', 'intent_window', 'number');
     bind_setting('#progression_rule', 'progression_rule', 'text');
     bind_setting('#foreshadow_next_plot_point', 'foreshadow_next_plot_point', 'boolean');
@@ -3848,7 +4107,7 @@ async function rerun_chat_evaluation() {
         toast('Aspect: Destinia is disabled for this chat.', 'warning');
         return;
     }
-    await evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
+    await scheduleDestiniaEvaluation(getGroupEvaluationTargetMessage());
     refresh_guidance();
     update_all_message_visuals();
 }
@@ -3894,9 +4153,9 @@ jQuery(async function () {
         if (!chat_enabled()) return;
         const mode = getMessagesEvaluatedMode();
         if (mode === 'assistant' || mode === 'both') {
-            evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
+            scheduleDestiniaEvaluation(getGroupEvaluationTargetMessage());
         } else if (mode === 'user' && pendingGroupUserEvaluationIndex !== null) {
-            evaluateDestiniaProgress(getGroupEvaluationTargetMessage());
+            scheduleDestiniaEvaluation(getGroupEvaluationTargetMessage());
         }
         refresh_guidance();
     });
