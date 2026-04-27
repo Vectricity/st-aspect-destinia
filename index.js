@@ -29,7 +29,7 @@ import { t, translate } from '../../../i18n.js';
 
 export { MODULE_NAME };
 
-// THe module name modifies where settings are stored, where information is stored on message objects, macros, etc.
+// The module name modifies where settings are stored, where information is stored on message objects, macros, etc.
 const MODULE_NAME = 'aspect_destinia';
 const MODULE_NAME_FANCY = 'Aspect: Destinia';
 const ROOT_ID = 'aspect_destinia_root';
@@ -336,6 +336,59 @@ let finishing_diagnostic_index = null;
 let lastEvaluationStartedAt = 0;
 let scheduledEvaluationSequence = 0;
 let scheduledEvaluationTask = Promise.resolve(null);
+
+// Evaluator execution is allowed to temporarily switch global SillyTavern profile/preset state.
+// Keep it serialized so overlapping evaluator calls cannot restore profile/preset out of order.
+let evaluatorExecutionQueue = Promise.resolve(null);
+
+// Tracks the currently executing evaluator key for diagnostics and overlap protection.
+let activeEvaluationKey = '';
+
+// Failed-key suppression prevents the same failed provider request from being retried repeatedly
+// by unrelated chat update / refresh events.
+let lastFailedEvaluationKey = '';
+let lastFailedEvaluationAt = 0;
+const FAILED_EVALUATION_RETRY_COOLDOWN_MS = 60_000;
+
+async function withEvaluatorExecutionLock(task) {
+    const previous = evaluatorExecutionQueue.catch(() => null);
+
+    let release;
+    const current = new Promise(resolve => {
+        release = resolve;
+    });
+
+    evaluatorExecutionQueue = previous.then(() => current);
+
+    await previous;
+
+    try {
+        return await task();
+    } finally {
+        release(null);
+    }
+}
+
+function shouldSuppressFailedEvaluationRetry(evaluationKey) {
+    if (!evaluationKey) return false;
+    if (evaluationKey !== lastFailedEvaluationKey) return false;
+    return Date.now() - lastFailedEvaluationAt < FAILED_EVALUATION_RETRY_COOLDOWN_MS;
+}
+
+function markEvaluationSucceeded(evaluationKey) {
+    lastEvaluationKey = evaluationKey;
+
+    if (lastFailedEvaluationKey === evaluationKey) {
+        lastFailedEvaluationKey = '';
+        lastFailedEvaluationAt = 0;
+    }
+}
+
+function markEvaluationFailed(evaluationKey) {
+    if (!evaluationKey) return;
+    lastFailedEvaluationKey = evaluationKey;
+    lastFailedEvaluationAt = Date.now();
+}
 function append_debug_log(level, args) {
     const entry = {
         timestamp: new Date().toISOString(),
@@ -1196,7 +1249,6 @@ async function scheduleDestiniaEvaluation(targetMessage = null) {
             }
         }
 
-        lastEvaluationStartedAt = Date.now();
         return evaluateDestiniaProgress(targetMessage);
     })();
     return scheduledEvaluationTask;
@@ -1247,6 +1299,10 @@ function buildEvaluationKey(targetMessage = null, evaluationContext = null) {
 }
 
 async function evaluateDestiniaProgress(targetMessage = null) {
+    return withEvaluatorExecutionLock(() => evaluateDestiniaProgressUnlocked(targetMessage));
+}
+
+async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
     if (!chat_enabled() || !get_settings('dest_enabled')) return null;
     if (!(await waitForEvaluationReady())) return null;
 
@@ -1261,6 +1317,14 @@ async function evaluateDestiniaProgress(targetMessage = null) {
         return null;
     }
 
+    if (shouldSuppressFailedEvaluationRetry(evaluationKey)) {
+        debug('Skipping recently failed Destinia evaluation for unchanged evidence', {
+            retryCooldownMs: FAILED_EVALUATION_RETRY_COOLDOWN_MS,
+            lastFailedEvaluationAt,
+        });
+        return null;
+    }
+
     const transitionState = getTransitionState();
     const prompt = transitionState.transitionActive
         ? buildTransitionCompletionPrompt(evaluationContext, transitionState)
@@ -1268,14 +1332,38 @@ async function evaluateDestiniaProgress(targetMessage = null) {
 
     if (!prompt) return null;
 
-    const evaluatorPreset = get_settings('evaluator_preset');
-    const evaluatorProfile = get_settings('evaluator_connection_profile');
-    const currentPreset = await get_current_preset();
+    activeEvaluationKey = evaluationKey;
+
+    const currentPreset = get_current_preset();
     const currentProfile = await get_current_connection_profile();
 
+    const evaluatorProfile = await get_evaluator_connection_profile();
+    const evaluatorPreset = await get_evaluator_preset(evaluatorProfile);
+
     try {
-        await set_connection_profile(evaluatorProfile);
-        await set_preset(evaluatorPreset);
+        const profileSwitchOk = await set_connection_profile(evaluatorProfile, {
+            warn: true,
+            verifyAfter: true,
+            reason: 'evaluator',
+        });
+
+        if (!profileSwitchOk) {
+            throw new Error(`Failed to switch to evaluator connection profile "${evaluatorProfile}".`);
+        }
+
+        const presetSwitchOk = await set_preset(evaluatorPreset, {
+            warn: true,
+            verifyAfter: true,
+            profileName: evaluatorProfile,
+            reason: 'evaluator',
+        });
+
+        if (!presetSwitchOk) {
+            throw new Error(`Failed to switch to evaluator preset "${evaluatorPreset}".`);
+        }
+
+        const actualProfileAfterSwitch = await get_current_connection_profile();
+        const actualPresetAfterSwitch = get_current_preset();
 
         active_diagnostic_loading_index = resolvedTargetMessage ? getContext().chat.indexOf(resolvedTargetMessage) : null;
         active_diagnostic_loading_started_at = Date.now();
@@ -1286,6 +1374,10 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             targetName: resolvedTargetMessage?.name || '',
             evaluatorProfile,
             evaluatorPreset,
+            actualProfileAfterSwitch,
+            actualPresetAfterSwitch,
+            currentProfileBeforeSwitch: currentProfile,
+            currentPresetBeforeSwitch: currentPreset,
             promptLength: prompt.length,
             promptPreview: prompt.slice(0, 300),
             transitionActive: transitionState.transitionActive,
@@ -1363,7 +1455,7 @@ async function evaluateDestiniaProgress(targetMessage = null) {
                 finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
             }
 
-            lastEvaluationKey = evaluationKey;
+            markEvaluationSucceeded(evaluationKey);
             render_status_panel();
             return parsed;
         }
@@ -1446,16 +1538,19 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             });
         }
 
-        lastEvaluationKey = evaluationKey;
+        markEvaluationSucceeded(evaluationKey);
         render_status_panel();
         return parsed;
     } catch (error) {
+        markEvaluationFailed(evaluationKey);
+
         trace_debug('EvaluateDestiniaProgress:error', {
             transitionActive: transitionState.transitionActive,
             targetIsUser: Boolean(resolvedTargetMessage?.is_user),
             targetName: resolvedTargetMessage?.name || '',
             evaluatorProfile,
             evaluatorPreset,
+            activeEvaluationKey,
             errorName: error?.name || '',
             errorMessage: error?.message || String(error || ''),
             errorStack: error?.stack || '',
@@ -1480,8 +1575,29 @@ async function evaluateDestiniaProgress(targetMessage = null) {
             update_all_message_visuals();
         }, 1500);
 
-        await set_connection_profile(currentProfile);
-        await set_preset(currentPreset);
+        const profileRestoreOk = await set_connection_profile(currentProfile, {
+            warn: false,
+            verifyAfter: true,
+            reason: 'restore',
+        });
+
+        const presetRestoreOk = await set_preset(currentPreset, {
+            warn: false,
+            verifyAfter: true,
+            profileName: currentProfile,
+            reason: 'restore',
+        });
+
+        trace_debug('EvaluateDestiniaProgress:restore', {
+            requestedRestoreProfile: currentProfile,
+            requestedRestorePreset: currentPreset,
+            profileRestoreOk,
+            presetRestoreOk,
+            actualProfileAfterRestore: await get_current_connection_profile(),
+            actualPresetAfterRestore: get_current_preset(),
+        });
+
+        activeEvaluationKey = '';
     }
 }
 
@@ -2198,82 +2314,154 @@ function add_i18n($element=null) {
 }
 
 // Completion presets
+function normalizeSwitchName(name) {
+    return String(name ?? '').trim();
+}
+
 function get_current_preset() {
-    // get the currently selected completion preset
-    return getPresetManager().getSelectedPresetName()
+    // Get the currently selected completion preset.
+    return getPresetManager().getSelectedPresetName();
 }
-async function get_evaluator_preset() {
-    // get the current evaluator preset OR the default if it isn't valid for the current API
-    let preset_name = get_settings('evaluator_preset');
-    if (preset_name === "" || !await verify_preset(preset_name)) {
-        preset_name = get_current_preset();
+
+async function get_evaluator_preset(profileName = null) {
+    // Blank evaluator preset means "use whatever preset is currently active".
+    const configuredPreset = normalizeSwitchName(get_settings('evaluator_preset'));
+
+    if (!configuredPreset) {
+        return get_current_preset();
     }
-    return preset_name
+
+    const targetProfile = profileName ?? await get_evaluator_connection_profile();
+    const valid = await verify_preset(configuredPreset, targetProfile);
+
+    if (valid) {
+        return configuredPreset;
+    }
+
+    toast_debounced(`Your selected evaluator preset "${configuredPreset}" is not valid for the evaluator connection profile. Falling back to the current preset.`, 'warning');
+    return get_current_preset();
 }
-async function set_preset(name) {
-    if (name === get_current_preset()) return;  // If already using the current preset, return
 
-    if (!check_preset_valid()) return;  // don't set an invalid preset
+async function set_preset(name, options = {}) {
+    const {
+        warn = true,
+        verifyAfter = true,
+        profileName = null,
+        reason = '',
+    } = options;
 
-    // Set the completion preset
-    debug(`Setting completion preset to ${name}`)
+    const targetPreset = normalizeSwitchName(name);
+
+    // Blank means "no dedicated preset switch". Never issue `/preset `.
+    if (!targetPreset) {
+        debug('Skipping completion preset switch because no preset name was provided', { reason });
+        return true;
+    }
+
+    const currentPreset = get_current_preset();
+    if (targetPreset === currentPreset) {
+        return true;
+    }
+
+    const valid = await verify_preset(targetPreset, profileName);
+    if (!valid) {
+        if (warn) {
+            toast_debounced(`Completion preset "${targetPreset}" is not valid${profileName ? ` for profile "${profileName}"` : ''}.`, 'warning');
+        }
+        debug('Skipping invalid completion preset switch', {
+            requestedPreset: targetPreset,
+            profileName,
+            reason,
+        });
+        return false;
+    }
+
+    debug(`Setting completion preset to "${targetPreset}"`, { reason });
     if (get_settings('debug_mode')) {
-        toastr.info(`Setting completion preset to ${name}`);
-    }
-    let ctx = getContext();
-    await ctx.executeSlashCommandsWithOptions(`/preset ${name}`)
-}
-async function get_presets() {
-    // Get the list of available completion presets for the selected evaluator connection profile API
-    let evaluator_api = await get_connection_profile_api()  // API for the evaluator connection profile (undefined if not active)
-    let { presets, preset_names } = getPresetManager().getPresetList(evaluator_api)  // presets for the given API (current if undefined)
-    // array of names
-    if (Array.isArray(preset_names)) return preset_names
-    // object of {names: index}
-    return Object.keys(preset_names)
-}
-async function verify_preset(name) {
-    // check if the given preset name is valid for the current API
-    if (name === "") return true;  // no preset selected, always valid
-
-    let preset_names = await get_presets()
-
-    if (Array.isArray(preset_names)) {  // array of names
-        return preset_names.includes(name)
-    } else {  // object of {names: index}
-        return preset_names[name] !== undefined
+        toastr.info(`Setting completion preset to "${targetPreset}"`);
     }
 
-}
-async function check_preset_valid() {
-    // check whether the current evaluator preset is valid
-    let evaluator_preset = get_settings('evaluator_preset')
-    let valid_preset = await verify_preset(evaluator_preset)
-    if (!valid_preset) {
-        toast_debounced(`Your selected evaluator preset "${evaluator_preset}" is not valid for the current API.`, "warning")
-        return false
+    const ctx = getContext();
+    await ctx.executeSlashCommandsWithOptions(`/preset ${targetPreset}`);
+
+    if (verifyAfter) {
+        const actualPreset = get_current_preset();
+        if (actualPreset !== targetPreset) {
+            trace_debug('PresetSwitch:verifyMismatch', {
+                requestedPreset: targetPreset,
+                actualPreset,
+                profileName,
+                reason,
+            });
+            return false;
+        }
     }
-    return true
+
+    return true;
 }
+
+async function get_presets(profileName = null) {
+    // Get the list of available completion presets for the given profile's API.
+    // If no profile is supplied, use the current active API.
+    const api = profileName ? await get_connection_profile_api(profileName) : undefined;
+    const result = getPresetManager().getPresetList(api) || {};
+    const presetNames = result.preset_names;
+
+    if (Array.isArray(presetNames)) {
+        return presetNames;
+    }
+
+    if (presetNames && typeof presetNames === 'object') {
+        return Object.keys(presetNames);
+    }
+
+    return [];
+}
+
+async function verify_preset(name, profileName = null) {
+    const targetPreset = normalizeSwitchName(name);
+    if (!targetPreset) return false;
+
+    const presetNames = await get_presets(profileName);
+    return Array.isArray(presetNames) && presetNames.includes(targetPreset);
+}
+
+async function check_preset_valid(name = get_settings('evaluator_preset'), options = {}) {
+    const { warn = true, profileName = null } = options;
+    const targetPreset = normalizeSwitchName(name);
+
+    // Blank evaluator preset is allowed because it means "fallback to current".
+    if (!targetPreset) return true;
+
+    const valid = await verify_preset(targetPreset, profileName);
+    if (!valid && warn) {
+        toast_debounced(`Your selected evaluator preset "${targetPreset}" is not valid for the selected API.`, 'warning');
+    }
+
+    return valid;
+}
+
 async function get_evaluator_preset_max_tokens() {
-    // get the maximum token length for the chosen evaluator preset
-    let preset_name = await get_evaluator_preset()
-    let preset = getPresetManager().getCompletionPresetByName(preset_name)
+    // Get the maximum token length for the chosen evaluator preset.
+    const evaluatorProfile = await get_evaluator_connection_profile();
+    const presetName = await get_evaluator_preset(evaluatorProfile);
+    const preset = getPresetManager().getCompletionPresetByName(presetName);
 
-    // if the preset doesn't have a genamt (which it may not for some reason), use the current genamt.
-    let max_tokens = preset?.genamt || preset?.openai_max_tokens || amount_gen
-    debug("Got evaluator preset genamt: "+max_tokens)
+    // If the preset doesn't have a generation amount, use the current generation amount.
+    const maxTokens = preset?.genamt || preset?.openai_max_tokens || amount_gen;
+    debug(`Got evaluator preset genamt: ${maxTokens}`);
 
-    return max_tokens
+    return maxTokens;
 }
 
 // Connection profiles
 let connection_profiles_active;
 let connection_profiles_ready = false;
+
 async function detect_connection_profiles_active() {
     try {
-        let ctx = getContext();
-        let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`);
+        const ctx = getContext();
+        const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
         const parsed = JSON.parse(String(result?.pipe || '[]'));
         connection_profiles_active = Array.isArray(parsed);
         connection_profiles_ready = true;
@@ -2282,113 +2470,184 @@ async function detect_connection_profiles_active() {
             connection_profiles_active = false;
         }
     }
+
     return connection_profiles_active;
 }
+
 function check_connection_profiles_active() {
     if (connection_profiles_ready !== true) {
         return false;
     }
+
     return connection_profiles_active === true;
 }
-async function get_current_connection_profile() {
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    // get the current connection profile
-    let ctx = getContext();
-    let result = await ctx.executeSlashCommandsWithOptions(`/profile`)
-    return result.pipe
-}
-async function get_connection_profile_api(name) {
-    // Get the API for the given connection profile name. If not given, get the current evaluator profile.
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    if (name === undefined) name = await get_evaluator_connection_profile()
-    let ctx = getContext();
-    let result = await ctx.executeSlashCommandsWithOptions(`/profile-get ${name}`)
 
-    if (!result.pipe) {
-        debug(`/profile-get ${name} returned nothing - no connection profile selected`)
-        return
+async function get_current_connection_profile() {
+    if (!check_connection_profiles_active()) return '';
+
+    const ctx = getContext();
+    const result = await ctx.executeSlashCommandsWithOptions('/profile');
+    return normalizeSwitchName(result?.pipe);
+}
+
+async function get_connection_profile_api(name = null) {
+    if (!check_connection_profiles_active()) return undefined;
+
+    const profileName = normalizeSwitchName(name || await get_current_connection_profile());
+    if (!profileName) return undefined;
+
+    const ctx = getContext();
+    const result = await ctx.executeSlashCommandsWithOptions(`/profile-get ${profileName}`);
+
+    if (!result?.pipe) {
+        debug(`/profile-get ${profileName} returned nothing - no connection profile selected`);
+        return undefined;
     }
 
     let data;
     try {
-        data = JSON.parse(result.pipe)
+        data = JSON.parse(result.pipe);
     } catch {
-        error(`Failed to parse JSON from /profile-get for \"${name}\". Result:`)
-        error(result)
-        return
+        error(`Failed to parse JSON from /profile-get for "${profileName}". Result:`);
+        error(result);
+        return undefined;
     }
 
     // If the API type isn't defined, it might be excluded from the connection profile. Assume based on mode.
     if (data.api === undefined) {
-        debug(`API not defined in connection profile ${name}. Mode is ${data.mode}`)
-        if (data.mode === 'tc') return 'textgenerationwebui'
-        if (data.mode === 'cc') return 'openai'
+        debug(`API not defined in connection profile "${profileName}". Mode is ${data.mode}`);
+        if (data.mode === 'tc') return 'textgenerationwebui';
+        if (data.mode === 'cc') return 'openai';
     }
 
-    // need to map the API type to a completion API
     if (CONNECT_API_MAP[data.api] === undefined) {
-        error(`API type "${data.api}" not found in CONNECT_API_MAP - could not identify API.`)
-        return
+        error(`API type "${data.api}" not found in CONNECT_API_MAP - could not identify API.`);
+        return undefined;
     }
-    return CONNECT_API_MAP[data.api].selected
+
+    return CONNECT_API_MAP[data.api].selected;
 }
+
 async function get_evaluator_connection_profile() {
-    // get the current evaluator connection profile OR the default if it isn't valid for the current API
-    let name = get_settings('evaluator_connection_profile');
-    if (name === "" || !await verify_connection_profile(name) || !check_connection_profiles_active()) {
-        name = await get_current_connection_profile();
-    }
-    return name
-}
-async function set_connection_profile(name) {
-    // Set the connection profile
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    if (name === await get_current_connection_profile()) return;  // If already using the given profile, return
-    if (!await check_connection_profile_valid()) return;  // don't set an invalid profile
+    // Blank evaluator profile means "use whatever profile is currently active".
+    const configuredProfile = normalizeSwitchName(get_settings('evaluator_connection_profile'));
 
-    // Set the completion preset
-    debug(`Setting connection profile to "${name}"`)
+    if (!check_connection_profiles_active()) {
+        return await get_current_connection_profile();
+    }
+
+    if (!configuredProfile) {
+        return await get_current_connection_profile();
+    }
+
+    const valid = await verify_connection_profile(configuredProfile);
+    if (valid) {
+        return configuredProfile;
+    }
+
+    toast_debounced(`Your selected evaluator connection profile "${configuredProfile}" is not valid. Falling back to the current connection profile.`, 'warning');
+    return await get_current_connection_profile();
+}
+
+async function set_connection_profile(name, options = {}) {
+    const {
+        warn = true,
+        verifyAfter = true,
+        reason = '',
+    } = options;
+
+    if (!check_connection_profiles_active()) {
+        return true;
+    }
+
+    const targetProfile = normalizeSwitchName(name);
+
+    // Blank means "no dedicated profile switch". Never issue `/profile `.
+    if (!targetProfile) {
+        debug('Skipping connection profile switch because no profile name was provided', { reason });
+        return true;
+    }
+
+    const currentProfile = await get_current_connection_profile();
+    if (targetProfile === currentProfile) {
+        return true;
+    }
+
+    const valid = await verify_connection_profile(targetProfile);
+    if (!valid) {
+        if (warn) {
+            toast_debounced(`Connection profile "${targetProfile}" is not valid.`, 'warning');
+        }
+        debug('Skipping invalid connection profile switch', {
+            requestedProfile: targetProfile,
+            reason,
+        });
+        return false;
+    }
+
+    debug(`Setting connection profile to "${targetProfile}"`, { reason });
     if (get_settings('debug_mode')) {
-        toastr.info(`Setting connection profile to "${name}"`);
+        toastr.info(`Setting connection profile to "${targetProfile}"`);
     }
-    let ctx = getContext();
-    await ctx.executeSlashCommandsWithOptions(`/profile ${name}`)
-    //await delay(2000)
-}
-async function get_connection_profiles() {
-    // Get a list of available connection profiles
 
-    if (!check_connection_profiles_active()) return [];  // if the extension isn't active, return
-    let ctx = getContext();
-    let result = await ctx.executeSlashCommandsWithOptions(`/profile-list`)
+    const ctx = getContext();
+    await ctx.executeSlashCommandsWithOptions(`/profile ${targetProfile}`);
+
+    if (verifyAfter) {
+        const actualProfile = await get_current_connection_profile();
+        if (actualProfile !== targetProfile) {
+            trace_debug('ConnectionProfileSwitch:verifyMismatch', {
+                requestedProfile: targetProfile,
+                actualProfile,
+                reason,
+            });
+            return false;
+        }
+    }
+
+    return true;
+}
+
+async function get_connection_profiles() {
+    if (!check_connection_profiles_active()) return [];
+
+    const ctx = getContext();
+    const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
+
     try {
         const parsed = JSON.parse(String(result?.pipe || '[]'));
         return Array.isArray(parsed) ? parsed : [];
     } catch {
-        error("Failed to parse JSON from /profile-list. Result:")
-        error(result)
+        error('Failed to parse JSON from /profile-list. Result:');
+        error(result);
         return [];
     }
-
 }
+
 async function verify_connection_profile(name) {
-    // check if the given connection profile name is valid
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    if (name === "") return true;  // no profile selected, always valid
+    const targetProfile = normalizeSwitchName(name);
+    if (!targetProfile) return false;
+    if (!check_connection_profiles_active()) return false;
 
-    let names = await get_connection_profiles()
-    return Array.isArray(names) && names.includes(name)
+    const names = await get_connection_profiles();
+    return Array.isArray(names) && names.includes(targetProfile);
 }
-async function check_connection_profile_valid()  {
-    // check whether the current evaluator connection profile is valid
-    if (connection_profiles_ready !== true) return;
-    if (!check_connection_profiles_active()) return;  // if the extension isn't active, return
-    let evaluator_connection = get_settings('evaluator_connection_profile')
-    let valid = await verify_connection_profile(evaluator_connection)
-    if (!valid) {
-        toast_debounced(`Your selected evaluator connection profile "${evaluator_connection}" is not valid.`, "warning")
+
+async function check_connection_profile_valid(name = get_settings('evaluator_connection_profile'), options = {}) {
+    const { warn = true } = options;
+    const targetProfile = normalizeSwitchName(name);
+
+    // Blank evaluator profile is allowed because it means "fallback to current".
+    if (!targetProfile) return true;
+
+    if (!check_connection_profiles_active()) return true;
+
+    const valid = await verify_connection_profile(targetProfile);
+    if (!valid && warn) {
+        toast_debounced(`Your selected evaluator connection profile "${targetProfile}" is not valid.`, 'warning');
     }
-    return valid
+
+    return valid;
 }
 
 
