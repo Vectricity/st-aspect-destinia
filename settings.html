@@ -70,6 +70,22 @@
                                 <label><input type="radio" name="messages_evaluated" value="both" /><span>Both</span></label>
                             </div>
                         </div>
+                        <div class="aspect-destinia-grid three sliders">
+                            <div class="aspect-destinia-field aspect-destinia-checkbox-field">
+                                <label class="aspect-destinia-label">Evaluation Cooldown</label>
+                                <div class="checkbox_label"><input id="evaluation_cooldown_enabled" type="checkbox" /><span class="aspect-destinia-checkbox-label-text">Enabled</span></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Cooldown Seconds</label>
+                                <input id="evaluation_cooldown_seconds" type="range" min="0" max="60" step="0.1" />
+                                <div class="aspect-destinia-slider-meta"><span id="evaluation_cooldown_seconds_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                            <div class="aspect-destinia-field">
+                                <label class="aspect-destinia-label">Post-Response Delay</label>
+                                <input id="evaluation_delay_seconds" type="range" min="0" max="10" step="0.1" />
+                                <div class="aspect-destinia-slider-meta"><span id="evaluation_delay_seconds_value" class="aspect-destinia-slider-value"></span></div>
+                            </div>
+                        </div>
                         <div class="aspect-destinia-field">
                             <button id="clear_chat" class="menu_button menu_button_danger">Delete Messages</button>
                         </div>
