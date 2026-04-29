@@ -1,3 +1,23 @@
+// ============================================================================
+// ============================================================================
+// SillyTavern Extension - Aspect: Destinia                  created by Genisai
+// ============================================================================
+// ============================================================================
+
+// ============================================================================
+// Section 1. Imports
+// ============================================================================
+// Owns all external dependencies used by this extension file.
+// Keep this section limited to import statements only.
+//
+// Organization:
+// - SillyTavern utility helpers
+// - SillyTavern core script APIs
+// - Extension/context APIs
+// - Preset, instruct, group-chat, constants, and i18n helpers
+// ============================================================================
+
+// SillyTavern utility helpers.
 import {
     getStringHash,
     debounce,
@@ -5,6 +25,8 @@ import {
     parseJsonFile,
     waitUntilCondition
 } from '../../../utils.js';
+
+// SillyTavern core script APIs.
 import {
     animation_duration,
     scrollChatToBottom,
@@ -20,7 +42,15 @@ import {
     CONNECT_API_MAP,
     messageFormatting,
 } from '../../../../script.js';
-import { getContext, extension_settings, saveMetadataDebounced} from '../../../extensions.js';
+
+// Extension context and settings APIs.
+import {
+	getContext,
+	extension_settings,
+	saveMetadataDebounced
+} from '../../../extensions.js';
+
+// Preset, instruct-mode, group-chat, constants, and translation helpers.
 import { getPresetManager } from '../../../preset-manager.js'
 import { formatInstructModeChat } from '../../../instruct-mode.js';
 import { selected_group } from '../../../group-chats.js';
@@ -29,20 +59,48 @@ import { t, translate } from '../../../i18n.js';
 
 export { MODULE_NAME };
 
-// The module name modifies where settings are stored, where information is stored on message objects, macros, etc.
+// ============================================================================
+// Section 2. Module Identity and DOM Constants
+// ============================================================================
+// Owns the extension's stable identity, settings namespace, display name,
+// root DOM id, and shared CSS/DOM selector constants.
+//
+// These values are referenced throughout the extension by settings storage,
+// chat metadata, message diagnostics, settings UI rendering, and DOM lookup.
+//
+// Keep this section limited to identity constants and selector/class constants.
+// ============================================================================
+
+// Extension namespace.
+// Changing this changes where SillyTavern stores extension settings, metadata,
+// message data, macros, and other module-scoped records.
 const MODULE_NAME = 'aspect_destinia';
+
+// Human-readable extension name used in logs, toasts, diagnostics, and UI text.
 const MODULE_NAME_FANCY = 'Aspect: Destinia';
+
+// Root DOM id for the extension settings/content container.
 const ROOT_ID = 'aspect_destinia_root';
-// CSS classes
-const css_message_div = `aspect_destinia_display`
-const state_div_class = `aspect_destinia_text`
-const settings_div_id = `aspect_destinia_settings`
-const settings_content_class = `aspect_destinia_settings_content`
+
+// Shared CSS class and DOM selector constants.
+const css_message_div = 'aspect_destinia_display';
+const state_div_class = 'aspect_destinia_text';
+const settings_div_id = 'aspect_destinia_settings';
+const settings_content_class = 'aspect_destinia_settings_content';
+
+// ============================================================================
+// Section 3. Help Text and Static UI Copy
+// ============================================================================
+// Owns human-facing descriptions used by settings labels, info tips, and help UI.
+// ============================================================================
 
 const LABEL_HELP = Object.freeze({
+    // General extension/profile controls.
     extension_enabled: 'Turns Destinia guidance generation on or off for the selected profile.',
     profile: 'The currently loaded configuration profile.',
     current_chat: 'The known-chat attachment target for the selected profile.',
+
+    // Evaluator connection and evidence controls.
     evaluator_connection_profile: 'Which connection profile the separate evaluator request uses.',
     evaluator_chat_completion_preset: 'Which completion preset the separate evaluator request uses.',
     recent_messages_to_evaluate: 'How many recent chat messages are included in evaluator evidence.',
@@ -50,21 +108,29 @@ const LABEL_HELP = Object.freeze({
     evaluation_cooldown_enabled: 'When enabled, enforces a minimum gap between evaluator requests to reduce burst traffic and rate-limit errors.',
     evaluation_cooldown_seconds: 'The minimum number of seconds to wait between evaluator requests when cooldown is enabled.',
     evaluation_delay_seconds: 'How long to wait after the assistant response finishes before starting evaluation.',
+
+    // Timeline editor and preset controls.
     timeline: 'The editable JSON source of truth for live story structure, plot points, objectives, and transitions.',
     timeline_preset: 'A saved timeline snapshot that can be selected, overwritten, duplicated, imported, or exported.',
     reset: 'Restore a field to its in-code default value.',
     repair: 'Rebuild Timeline JSON into the current live schema by removing invalid/outdated structure and adding missing required structure.',
     reset_objectives: 'Set all objective `completed` booleans in the visible Timeline JSON to `false`.',
+
+    // Timeline behavior controls.
     timeline_deviation: 'Allows the story to move off-script from the planned timeline.',
     timeline_deviation_auto_resolve: 'Attempts to guide the story back toward the timeline after deviation.',
     detach: 'Allows plot progression to continue apart from the user\'s active scene.',
     detach_instruction: 'Guidance text explaining how detached progression should behave.',
+
+    // Progression and objective evaluation controls.
     progression_rule: 'Selects what can trigger plot progression: clear user intent, objective completion threshold, either one, or both together.',
     objective_auto_advance_threshold: 'The completion ratio required before objective completion can trigger plot progression.',
     objective_evaluation_method: 'Chooses whether objective completion comes from the integrated evaluator response or per-objective checks.',
     plot_alignment_strictness: 'How tightly guidance should adhere to the current plot point.',
     plot_progression_aggressiveness: 'How strongly guidance should push toward progression when allowed.',
     plot_foreshadowing: 'Whether guidance may seed the next plot point before full progression.',
+
+    // Editable guidance/evaluator template fields.
     injected_guidance_fields: 'Editable text templates and instructions used to build the injected guidance and evaluator behavior.',
     injection_intro: 'Editable text template used as the opening instruction block for injected Destinia guidance.',
     guidance_principles: 'Editable principles that define how Destinia should balance plot guidance, immersion, and user agency.',
@@ -81,18 +147,34 @@ const LABEL_HELP = Object.freeze({
     auto_resolve_deviation_instruction: 'Instruction used when deviation is allowed and Destinia should gradually guide the story back on track.',
     guidance_outro: 'Editable closing instruction appended to the main injected guidance block.',
     evaluator_prompt: 'The evaluator prompt template that judges progression, stagnation, confidence, and objective completion.',
+
+    // Guidance injection controls.
     guidance_placement: 'Controls where the main live Destinia guidance prompt is inserted into prompt assembly for generation. This is the active timeline-guidance injection that tells the LLM what the current plot point, objectives, and guidance instructions are.',
     include_in_world_info_scanning: 'Whether the injected prompt should participate in world-info scanning when SillyTavern builds context.',
+
+    // Debugging and miscellaneous controls.
     fresh_reset_extension: 'Reset current-chat Destinia state for fresh testing without deleting profiles or presets.',
     download_debug_log: 'Export the in-memory debug trace collected while `Debug Mode` is enabled.',
     display_message_state: 'Show per-message diagnostic/state surfaces in chat.',
     enable_guidance_in_new_chats: 'Default enabled state for new chats.',
     use_global_toggle_state: 'Use one shared enabled/disabled toggle state instead of per-chat state.',
     notify_on_switch: 'Show a toast when profiles switch.',
-    debug_mode: 'Enable console logging plus in-memory trace collection for exported debug logs.'
+    debug_mode: 'Enable console logging plus in-memory trace collection for exported debug logs.',
 });
 
-// Destinia foundation constants
+// ============================================================================
+// Section 4. Timeline Schema, Defaults, and Template Validation
+// ============================================================================
+// Owns static timeline defaults, evaluator prompt defaults, required timeline
+// fields, and template validation rules.
+// ============================================================================
+
+// -----------------------------------------------------------------------------
+// Timeline Schema - Default Timeline Template
+// -----------------------------------------------------------------------------
+// Canonical starter timeline used for new installs, repair fallback, and invalid
+// timeline recovery. This object is a static template, not live timeline state.
+
 const DEFAULT_TIMELINE_TEMPLATE = {
     storyTitle: 'Your Story Title',
     systemStyle: 'Describe only the global storytelling style rules that should apply throughout the timeline. Include the tone, canon strictness, pacing feel, narration/dialogue style, and how flexible the roleplay may be. Keep this specific and directive rather than broad or flowery. Avoid repeating plot events, character biographies, or arc summaries here.',
@@ -107,11 +189,11 @@ const DEFAULT_TIMELINE_TEMPLATE = {
             objectives: [
                 'Establish the setting and immediate situation.',
                 'Surface the main character motivations that matter for this phase.',
-                'Allow the user to meaningfully interact with the current story situation.'
+                'Allow the user to meaningfully interact with the current story situation.',
             ],
             steeringPrompt: 'Keep the narrative focused on the opening situation while remaining flexible to the user’s choices.',
             pace: 'medium',
-            delayable: true
+            delayable: true,
         },
         {
             id: 'plot-point-2',
@@ -120,14 +202,20 @@ const DEFAULT_TIMELINE_TEMPLATE = {
             objectives: [
                 'Introduce the next complication or escalation naturally.',
                 'Preserve continuity from the prior plot point.',
-                'Let the user influence how the transition feels.'
+                'Let the user influence how the transition feels.',
             ],
             steeringPrompt: 'Transition naturally into the escalation without making the shift feel abrupt or forced.',
             pace: 'medium',
-            delayable: true
-        }
-    ]
+            delayable: true,
+        },
+    ],
 };
+
+// -----------------------------------------------------------------------------
+// Timeline Schema - Evaluator Prompt Defaults
+// -----------------------------------------------------------------------------
+// Canonical default evaluator prompts. These define expected JSON response shape
+// and the static instructions used when profiles do not override evaluator text.
 
 const DEFAULT_EVALUATOR_PROMPT = `You are evaluating roleplay progression for a story timeline controller.
 Read the recent chat and determine whether the current plot point should remain active or whether transition state should be set.
@@ -155,6 +243,7 @@ Next plot point title: {{nextTitle}}
 Next plot point summary: {{nextSummary}}
 Recent chat selected for evaluation:
 {{recentChat}}`;
+
 const DEFAULT_TRANSITION_COMPLETION_PROMPT = `You are evaluating whether an active story transition has completed.
 Read the recent chat and determine whether the transition from the source plot point to the destination plot point has actually completed in the narrative.
 Judge completion based on whether the story has meaningfully bridged from source context into destination context.
@@ -174,13 +263,25 @@ Transition guidance: {{transitionGuidance}}
 Recent chat selected for evaluation:
 {{recentChat}}`;
 
+// Shared evaluator prompt migration/evidence rules.
+// These are static text fragments used when normalizing older saved profiles.
+const EVALUATOR_OBJECTIVE_BASE_RULE = 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.';
+
+const EVALUATOR_OBJECTIVE_EVIDENCE_RULE = 'Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.';
+
+// -----------------------------------------------------------------------------
+// Timeline Schema - Required Structure
+// -----------------------------------------------------------------------------
+// Field declarations used by timeline validation and repair logic.
+// These describe required shape only; they do not validate by themselves.
+
 const TIMELINE_REQUIRED_TOP_LEVEL_FIELDS = Object.freeze([
     { key: 'storyTitle', label: 'storyTitle' },
     { key: 'systemStyle', label: 'systemStyle' },
     { key: 'currentPlotPoint', label: 'currentPlotPoint' },
     { key: 'transitionFrom', label: 'transitionFrom' },
     { key: 'transitionTo', label: 'transitionTo' },
-    { key: 'plotPoints', label: 'plotPoints[]', isArray: true }
+    { key: 'plotPoints', label: 'plotPoints[]', isArray: true },
 ]);
 
 const TIMELINE_REQUIRED_PLOT_POINT_FIELDS = Object.freeze([
@@ -188,8 +289,14 @@ const TIMELINE_REQUIRED_PLOT_POINT_FIELDS = Object.freeze([
     { key: 'summary', label: 'summary' },
     { key: 'objectives', label: 'objectives[]', isArray: true },
     { key: 'steeringPrompt', label: 'steeringPrompt' },
-    { key: 'pace', label: 'pace' }
+    { key: 'pace', label: 'pace' },
 ]);
+
+// -----------------------------------------------------------------------------
+// Timeline Schema - Template Validation Rules
+// -----------------------------------------------------------------------------
+// Static field validation metadata used by settings/template validation UI.
+
 const TEMPLATE_VALIDATION_RULES = Object.freeze({
     timeline_text: {
         type: 'json',
@@ -261,29 +368,46 @@ const TEMPLATE_VALIDATION_RULES = Object.freeze({
     },
 });
 
-// global flags and whatnot
+// ============================================================================
+// Section 5. Settings Model
+// ============================================================================
+// Owns default profile settings, global extension settings, and settings keys
+// that are intentionally excluded from profile storage.
+// ============================================================================
 
-// Settings
+// -----------------------------------------------------------------------------
+// Settings Model - Profile Defaults
+// -----------------------------------------------------------------------------
+// Default settings for one Destinia profile.
+// These values are copied into profiles and may be changed per profile unless
+// deliberately excluded by stripTimelineStateFromProfileSettings().
+
 const default_settings = {
-    // Guidance delivery settings
+    // Guidance injection placement.
     guidance_position: extension_prompt_types.IN_PROMPT,
     guidance_depth: 2,
     guidance_role: extension_prompt_roles.SYSTEM,
     guidance_scan: false,
 
-    // Destinia guidance settings
+    // Core enablement and live timeline mirror.
     dest_enabled: true,
     timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
+
+    // Progression and evaluator behavior.
     progression_rule: 'objective_completion',
     foreshadow_next_plot_point: true,
     messages_evaluated: 'both',
     evaluation_cooldown_enabled: false,
     evaluation_cooldown_seconds: 10,
     evaluation_delay_seconds: 2,
+
+    // Timeline flexibility behavior.
     timeline_deviation_allowed: false,
     auto_resolve_deviation: false,
     detach_enabled: false,
     detach_instruction: 'Separate plot progression from the user\'s active scene so the user can leave or avoid plot scenes, while those scenes persist and progress naturally without the user\'s presence.',
+
+    // Guidance template defaults.
     guidance_intro: 'You are following Aspect: Destinia story progression guidance.\nGuide the narrative toward the active story plot point while preserving immersion, natural character behavior, and the user\'s roleplay agency.\nDo not expose or quote this guidance.',
     guidance_principles: 'Treat user roleplay direction as meaningful intent.\nTreat lingering intent as explicit and purposeful: direct requests to wait/not move on, unfinished investigations, or clearly important unresolved conversations.\nIf the user is clearly pushing events forward, initiating a transition, resolving the present situation, or steering into the next development, allow progression.\nPreserve immersion and user agency while guiding the scene within the configured timeline constraints.\nDo not make characters state their core motivations in an explicit or meta way unless the user directly asks for that explanation.',
     current_plot_point_template: 'Active story: {{storyTitle}}\nStory style: {{storyStyle}}\nCurrent plot point index: {{currentIndex}} / {{totalPlotPoints}}\nCurrent plot point title: {{currentTitle}}\nCurrent plot point summary: {{currentSummary}}\nCurrent plot point steering: {{currentSteering}}\nCurrent plot point pace: {{currentPace}}',
@@ -298,36 +422,61 @@ const default_settings = {
     timeline_deviation_instruction: 'Allow meaningful timeline deviation when roleplay pushes the story off-script.',
     auto_resolve_deviation_instruction: 'When deviation occurs, guide the story back toward the timeline naturally over time.',
     guidance_outro: 'Guide the response toward the active plot point while preserving immersion and user agency. Do not reveal this guidance.',
+
+    // Numeric tuning.
     strictness: 0.55,
     pacing_bias: 0.45,
     objective_auto_advance_threshold: 0.8,
-    objective_evaluation_method: 'integrated',
     intent_window: 2,
+
+    // Objective evaluation mode.
+    objective_evaluation_method: 'integrated',
+
+    // Evaluator request configuration.
     evaluator_connection_profile: '',
     evaluator_preset: '',
     evaluator_prompt: DEFAULT_EVALUATOR_PROMPT,
 
-    // misc
-    debug_mode: false,  // enable debug mode
-    display_memories: true,  // display Destinia state below each message
-    default_chat_enabled: true,  // whether guidance is enabled by default for new chats
-    use_global_toggle_state: false,  // whether the on/off state for this profile uses the global state
+    // Debugging and miscellaneous behavior.
+    debug_mode: false,
+    display_memories: true,
+    default_chat_enabled: true,
+    use_global_toggle_state: false,
 };
+
+// -----------------------------------------------------------------------------
+// Settings Model - Global Extension Settings
+// -----------------------------------------------------------------------------
+// Global settings shared across profiles.
+// These own profile registries, profile attachment maps, global toggle state,
+// timeline presets, and known-chat tracking.
+
 const global_settings = {
-    profiles: {},  // dict of profiles by name
-    character_profiles: {},  // dict of character identifiers to profile names
+    // Profile registry and attachment maps.
+    profiles: {},
+    character_profiles: {},
     chat_profiles: {},
-    profile: 'Default', // Current profile
+    profile: 'Default',
+
+    // Global extension behavior.
     notify_on_profile_switch: false,
-    global_toggle_state: true,  // global state of guidance (used when a profile uses the global state)
+    global_toggle_state: true,
 
     // Timeline state is global/preset-owned, never profile-owned.
     timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     timeline_presets: {},
     selected_timeline_preset: 'default_timeline_preset',
 
+    // Known chat registry used by chat/profile attachment UI.
     known_chats: {},
-}
+};
+
+// -----------------------------------------------------------------------------
+// Settings Model - Profile Exclusion Rules
+// -----------------------------------------------------------------------------
+// These keys must never be saved into individual profiles.
+// Timeline JSON and timeline preset state live globally so changing profiles
+// cannot silently overwrite or restore the active timeline.
 
 const TIMELINE_STATE_KEYS = Object.freeze([
     'timeline_text',
@@ -337,36 +486,102 @@ const TIMELINE_STATE_KEYS = Object.freeze([
 
 function stripTimelineStateFromProfileSettings(settings = {}) {
     const stripped = structuredClone(settings || {});
+
     for (const key of TIMELINE_STATE_KEYS) {
         delete stripped[key];
     }
+
     return stripped;
 }
-const settings_ui_map = {}  // map of settings to UI elements
 
+// -----------------------------------------------------------------------------
+// Settings Model - Settings UI Registry
+// -----------------------------------------------------------------------------
+// Runtime map of setting keys to bound UI elements.
+// Defined here because it describes the settings model surface, but populated by
+// Settings UI Binding and Refresh.
 
-// Utility functions
+const settings_ui_map = {};
+
+// ============================================================================
+// Section 6. Runtime State
+// ============================================================================
+// Owns in-memory state that should not be directly persisted as settings.
+// Includes diagnostic animation state, evaluator scheduling state, evaluator
+// retry state, and other temporary execution flags.
+// ============================================================================
+
+// -----------------------------------------------------------------------------
+// Runtime State - Debug Log Buffer
+// -----------------------------------------------------------------------------
+// In-memory debug trace storage. The buffer is exported by downloadDebugLog()
+// and trimmed by append_debug_log().
+
 const DEBUG_LOG_LIMIT = 400;
 let debug_log_entries = [];
+
+// -----------------------------------------------------------------------------
+// Runtime State - Message Diagnostic Display
+// -----------------------------------------------------------------------------
+// Tracks temporary visual states for per-message diagnostics in chat.
+
 let active_diagnostic_loading_index = null;
 let active_diagnostic_loading_started_at = 0;
 let finishing_diagnostic_index = null;
+
+// -----------------------------------------------------------------------------
+// Runtime State - Evaluator Scheduling
+// -----------------------------------------------------------------------------
+// Tracks delayed/cooldown evaluator execution so repeated chat events do not
+// cause overlapping evaluator requests.
+
 let lastEvaluationStartedAt = 0;
 let scheduledEvaluationSequence = 0;
 let scheduledEvaluationTask = Promise.resolve(null);
 
 // Evaluator execution may send background requests through Connection Manager.
-// Keep evaluator calls serialized so repeated events cannot overlap diagnostics or retry state.
+// Keep evaluator calls serialized so repeated events cannot overlap diagnostics
+// or retry state.
 let evaluatorExecutionQueue = Promise.resolve(null);
 
-// Tracks the currently executing evaluator key for diagnostics.
-let activeEvaluationKey = '';
+// -----------------------------------------------------------------------------
+// Runtime State - Evaluator Duplicate and Retry Suppression
+// -----------------------------------------------------------------------------
+// Tracks evaluator evidence keys so unchanged evidence is not repeatedly
+// evaluated, and recently failed provider calls are not spam-retried.
 
-// Failed-key suppression prevents the same failed provider request from being retried repeatedly
-// by unrelated chat update / refresh events. It intentionally shares the existing Evaluation Cooldown
-// setting so there is one user-facing cooldown value controlling evaluator retry spacing.
+let activeEvaluationKey = '';
+let lastEvaluationKey = '';
 let lastFailedEvaluationKey = '';
 let lastFailedEvaluationAt = 0;
+
+// -----------------------------------------------------------------------------
+// Runtime State - Group Evaluation Tracking
+// -----------------------------------------------------------------------------
+// Tracks pending group-chat user-message evaluation when evaluator scope is
+// configured around user messages.
+
+let pendingGroupUserEvaluationIndex = null;
+
+// -----------------------------------------------------------------------------
+// Runtime State - Connection Manager Detection
+// -----------------------------------------------------------------------------
+// Tracks whether SillyTavern Connection Manager profiles are available and
+// whether detection has already been traced.
+
+let connection_profiles_active = false;
+let connection_profiles_ready = false;
+let connectionManagerDetectTraceSignature = '';
+
+// ============================================================================
+// Aspect: Destinia — Logging, Debugging, and Toast Helpers
+// ============================================================================
+// Owns console output, debug trace capture, exported debug logs, and toast
+// wrappers.
+//
+// Evaluator cooldown/locking helpers do not belong here; move those later into
+// Evaluator System - Scheduling, Cooldown, and Duplicate Suppression.
+// ============================================================================
 
 function getFailedEvaluationRetryCooldownMs() {
     return getEvaluationCooldownMs();
@@ -676,9 +891,6 @@ function getValidatedTimelineText(rawText) {
         };
     }
 }
-const EVALUATOR_OBJECTIVE_BASE_RULE = 'Only mark objectives complete when the conversation meaningfully demonstrates progress. Do not mark completion from weak implication alone.';
-
-const EVALUATOR_OBJECTIVE_EVIDENCE_RULE = 'Treat each objective independently by index. Mark an objective true only when the evaluated messages provide direct evidentiary support that the objective is actually fulfilled. If the evidence is ambiguous, indirect, incomplete, or better fits a different objective, leave that objective false. Do not infer completion from theme, tone, relevance, likely future outcomes, or general plot adjacency.';
 
 function removeRepeatedExactText(text, needle) {
     text = String(text || '');
@@ -1181,7 +1393,7 @@ function buildTransitionCompletionPrompt(evaluationContext = null, transitionSta
     });
 }
 
-async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [], evaluationContext = null) {
+async function evaluateSeparatelyPerObjective(currentObjectives = [], evaluationContext = null) {
     const { timeline, current } = getCurrentPlotPoint();
     const contextForEvaluation = evaluationContext || getRecentEvaluationContext({ trace: true });
     const recentChatText = contextForEvaluation.recentChat.map(formatEvaluationMessageLine).join('\n');
@@ -1226,9 +1438,6 @@ async function evaluateObjectivesWithSuperObjectivePattern(currentObjectives = [
 
     return results;
 }
-
-let lastEvaluationKey = '';
-let pendingGroupUserEvaluationIndex = null;
 
 function getLastGroupGenerationId() {
     const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
@@ -1624,7 +1833,7 @@ commitTimelineText(nextTimelineText);
         const integratedObjectiveReasons = Array.isArray(parsed?.objective_reasons) ? parsed.objective_reasons.map(item => String(item || '')) : [];
 
         const objectiveResults = objectiveEvaluationMethod === 'per_objective'
-            ? await evaluateObjectivesWithSuperObjectivePattern(currentObjectives, evaluationContext)
+            ? await evaluateSeparatelyPerObjective(currentObjectives, evaluationContext)
             : currentObjectives.map((objective, index) => ({
                 completed: Boolean(integratedObjectiveCompletion[index] ?? (typeof objective?.completed === 'boolean' ? objective.completed : false)),
                 reason: integratedObjectiveReasons[index] || '',
@@ -2516,10 +2725,6 @@ function isConnectionManagerAvailable() {
 
     return getConnectionManagerProfiles().length > 0;
 }
-
-let connection_profiles_active = false;
-let connection_profiles_ready = false;
-let connectionManagerDetectTraceSignature = '';
 
 function getConnectionManagerDiagnosticSnapshot() {
     const service = getConnectionManagerRequestService();
@@ -4814,7 +5019,7 @@ jQuery(async function () {
         refreshStatusNow: false,
     });
 
-    // initialize UI stuff
+    // initialize UI
     initialize_settings_listeners();
     initialize_slash_commands();
     initialize_menu_buttons();
