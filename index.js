@@ -320,9 +320,27 @@ const global_settings = {
     profile: 'Default', // Current profile
     notify_on_profile_switch: false,
     global_toggle_state: true,  // global state of guidance (used when a profile uses the global state)
+
+    // Timeline state is global/preset-owned, never profile-owned.
+    timeline_text: JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2),
     timeline_presets: {},
     selected_timeline_preset: 'default_timeline_preset',
+
     known_chats: {},
+}
+
+const TIMELINE_STATE_KEYS = Object.freeze([
+    'timeline_text',
+    'timeline_presets',
+    'selected_timeline_preset',
+]);
+
+function stripTimelineStateFromProfileSettings(settings = {}) {
+    const stripped = structuredClone(settings || {});
+    for (const key of TIMELINE_STATE_KEYS) {
+        delete stripped[key];
+    }
+    return stripped;
 }
 const settings_ui_map = {}  // map of settings to UI elements
 
@@ -337,18 +355,22 @@ let lastEvaluationStartedAt = 0;
 let scheduledEvaluationSequence = 0;
 let scheduledEvaluationTask = Promise.resolve(null);
 
-// Evaluator execution is allowed to temporarily switch global SillyTavern profile/preset state.
-// Keep it serialized so overlapping evaluator calls cannot restore profile/preset out of order.
+// Evaluator execution may send background requests through Connection Manager.
+// Keep evaluator calls serialized so repeated events cannot overlap diagnostics or retry state.
 let evaluatorExecutionQueue = Promise.resolve(null);
 
-// Tracks the currently executing evaluator key for diagnostics and overlap protection.
+// Tracks the currently executing evaluator key for diagnostics.
 let activeEvaluationKey = '';
 
 // Failed-key suppression prevents the same failed provider request from being retried repeatedly
-// by unrelated chat update / refresh events.
+// by unrelated chat update / refresh events. It intentionally shares the existing Evaluation Cooldown
+// setting so there is one user-facing cooldown value controlling evaluator retry spacing.
 let lastFailedEvaluationKey = '';
 let lastFailedEvaluationAt = 0;
-const FAILED_EVALUATION_RETRY_COOLDOWN_MS = 60_000;
+
+function getFailedEvaluationRetryCooldownMs() {
+    return getEvaluationCooldownMs();
+}
 
 async function withEvaluatorExecutionLock(task) {
     const previous = evaluatorExecutionQueue.catch(() => null);
@@ -372,7 +394,13 @@ async function withEvaluatorExecutionLock(task) {
 function shouldSuppressFailedEvaluationRetry(evaluationKey) {
     if (!evaluationKey) return false;
     if (evaluationKey !== lastFailedEvaluationKey) return false;
-    return Date.now() - lastFailedEvaluationAt < FAILED_EVALUATION_RETRY_COOLDOWN_MS;
+
+    const cooldownMs = getFailedEvaluationRetryCooldownMs();
+
+    // If Evaluation Cooldown is disabled, failed-key retry suppression is also disabled.
+    if (cooldownMs <= 0) return false;
+
+    return Date.now() - lastFailedEvaluationAt < cooldownMs;
 }
 
 function markEvaluationSucceeded(evaluationKey) {
@@ -732,13 +760,123 @@ function normalizeImportedProfile(data = {}) {
 
     normalized.evaluator_prompt = normalizeEvaluatorPromptSchema(normalized.evaluator_prompt);
 
-    const timelineResult = getValidatedTimelineText(normalized.timeline_text);
-    normalized.timeline_text = timelineResult.timelineText;
-
-    return normalized;
+    // Profiles must never own, restore, or overwrite Timeline JSON.
+    return stripTimelineStateFromProfileSettings(normalized);
 }
+function getTimelineEditorElement() {
+    return document.querySelector(`.${settings_content_class} #timeline_text`);
+}
+
+function getLiveTimelineText() {
+    const editor = getTimelineEditorElement();
+
+    // When the editor contains valid JSON, treat it as the freshest source.
+    // This makes manual Timeline JSON edits immediately visible to extension logic.
+    if (editor) {
+        const editorText = String(editor.value || '');
+        const editorResult = getValidatedTimelineText(editorText);
+        if (editorResult.valid) {
+            return editorResult.timelineText;
+        }
+    }
+
+    return get_settings('timeline_text');
+}
+
 function getDestiniaTimeline() {
-    return getValidatedTimelineText(get_settings('timeline_text')).timeline;
+    return getValidatedTimelineText(getLiveTimelineText()).timeline;
+}
+
+function commitTimelineText(rawTimelineText, options = {}) {
+    const {
+        updateEditor = true,
+        refreshGuidanceNow = true,
+        refreshStatusNow = true,
+        showInvalidToast = true,
+    } = options;
+
+    ensureDefaultTimelinePreset();
+
+    const timelineResult = getValidatedTimelineText(rawTimelineText);
+    if (!timelineResult.valid) {
+        if (showInvalidToast) {
+            toast(`Timeline JSON not saved: ${timelineResult.issues.join('; ')}`, 'warning');
+        }
+        updateFieldValidationIndicators();
+        updateTimelinePresetControls();
+        return false;
+    }
+
+    const timelineText = timelineResult.timelineText;
+
+    const presets = get_settings('timeline_presets', true) || {};
+    let presetId = get_settings('selected_timeline_preset') || 'default_timeline_preset';
+
+    if (!presets[presetId]) {
+        presetId = 'default_timeline_preset';
+        set_settings('selected_timeline_preset', presetId);
+    }
+
+    if (!presets[presetId]) {
+        presets[presetId] = {
+            name: 'Default Timeline',
+            timelineText,
+        };
+    } else {
+        presets[presetId] = {
+            ...presets[presetId],
+            timelineText,
+        };
+    }
+
+    // timeline_text is now a live mirror of the selected preset.
+    set_settings('timeline_text', timelineText);
+    set_settings('timeline_presets', presets);
+
+    // Programmatic mutations must be visible in the Timeline JSON editor.
+    if (updateEditor) {
+        const editor = getTimelineEditorElement();
+        if (editor) {
+            editor.value = timelineText;
+        }
+    }
+
+    refresh_settings_for_timeline_controls();
+
+    if (refreshStatusNow) {
+        render_status_panel();
+    }
+
+    if (refreshGuidanceNow) {
+        refresh_guidance();
+    }
+
+    return true;
+}
+
+function syncTimelineTextFromSelectedPreset(options = {}) {
+    ensureDefaultTimelinePreset();
+
+    const presets = get_settings('timeline_presets', true) || {};
+    let presetId = get_settings('selected_timeline_preset') || 'default_timeline_preset';
+
+    if (!presets[presetId]) {
+        presetId = 'default_timeline_preset';
+        set_settings('selected_timeline_preset', presetId);
+    }
+
+    const timelineText = String(
+        presets[presetId]?.timelineText
+        || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2)
+    );
+
+    return commitTimelineText(timelineText, {
+        updateEditor: true,
+        refreshGuidanceNow: true,
+        refreshStatusNow: true,
+        showInvalidToast: true,
+        ...options,
+    });
 }
 function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
@@ -758,7 +896,7 @@ function persistObjectiveCompletionToTimeline(objectiveCompletion = []) {
     });
 
     const nextTimelineText = JSON.stringify(timeline, null, 2);
-    set_settings('timeline_text', nextTimelineText);
+commitTimelineText(nextTimelineText);
 }
 function resetTimelineObjectivesToFalse() {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
@@ -780,7 +918,7 @@ function resetTimelineObjectivesToFalse() {
     }
 
     const nextTimelineText = JSON.stringify(timeline, null, 2);
-    set_settings('timeline_text', nextTimelineText);
+commitTimelineText(nextTimelineText);
 }
 function getCurrentPlotPoint() {
     const timeline = getDestiniaTimeline();
@@ -917,6 +1055,7 @@ function buildDestiniaGuidance() {
         'Do not expose or quote this guidance.'
     ].filter(Boolean).join('\n');
 }
+
 function getMessagesEvaluatedMode() {
     return get_settings('messages_evaluated') || 'both';
 }
@@ -1319,7 +1458,7 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
 
     if (shouldSuppressFailedEvaluationRetry(evaluationKey)) {
         debug('Skipping recently failed Destinia evaluation for unchanged evidence', {
-            retryCooldownMs: FAILED_EVALUATION_RETRY_COOLDOWN_MS,
+            retryCooldownMs: getFailedEvaluationRetryCooldownMs(),
             lastFailedEvaluationAt,
         });
         return null;
@@ -1334,37 +1473,11 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
 
     activeEvaluationKey = evaluationKey;
 
-    const currentPreset = get_current_preset();
-    const currentProfile = await get_current_connection_profile();
-
-    const evaluatorProfile = await get_evaluator_connection_profile();
-    const evaluatorPreset = await get_evaluator_preset(evaluatorProfile);
+    const evaluatorProfileId = getEvaluatorConnectionProfileId();
+    const evaluatorProfileRecord = getConnectionProfileRecordById(evaluatorProfileId);
+    const evaluatorPreset = await get_evaluator_preset(evaluatorProfileId);
 
     try {
-        const profileSwitchOk = await set_connection_profile(evaluatorProfile, {
-            warn: true,
-            verifyAfter: true,
-            reason: 'evaluator',
-        });
-
-        if (!profileSwitchOk) {
-            throw new Error(`Failed to switch to evaluator connection profile "${evaluatorProfile}".`);
-        }
-
-        const presetSwitchOk = await set_preset(evaluatorPreset, {
-            warn: true,
-            verifyAfter: true,
-            profileName: evaluatorProfile,
-            reason: 'evaluator',
-        });
-
-        if (!presetSwitchOk) {
-            throw new Error(`Failed to switch to evaluator preset "${evaluatorPreset}".`);
-        }
-
-        const actualProfileAfterSwitch = await get_current_connection_profile();
-        const actualPresetAfterSwitch = get_current_preset();
-
         active_diagnostic_loading_index = resolvedTargetMessage ? getContext().chat.indexOf(resolvedTargetMessage) : null;
         active_diagnostic_loading_started_at = Date.now();
         update_all_message_visuals();
@@ -1372,21 +1485,24 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
         trace_debug('EvaluateDestiniaProgress:start', {
             targetIsUser: Boolean(resolvedTargetMessage?.is_user),
             targetName: resolvedTargetMessage?.name || '',
-            evaluatorProfile,
+            evaluatorProfileId,
+            evaluatorProfileName: evaluatorProfileRecord?.name || '',
+            evaluatorProfileApi: evaluatorProfileRecord?.api || '',
+            evaluatorProfilePreset: evaluatorProfileRecord?.preset || '',
             evaluatorPreset,
-            actualProfileAfterSwitch,
-            actualPresetAfterSwitch,
-            currentProfileBeforeSwitch: currentProfile,
-            currentPresetBeforeSwitch: currentPreset,
+            usingConnectionManagerRequest: Boolean(evaluatorProfileId && evaluatorProfileRecord && getConnectionManagerRequestService()?.sendRequest),
+            availableConnectionProfiles: getConnectionManagerProfiles().map(item => ({
+                id: item.id,
+                name: item.name,
+                api: item.api || '',
+                preset: item.preset || '',
+            })),
             promptLength: prompt.length,
             promptPreview: prompt.slice(0, 300),
             transitionActive: transitionState.transitionActive,
         });
 
-        const response = await generateRaw({
-            prompt,
-            trimNames: false,
-        });
+        const response = await sendEvaluatorRequest(prompt, evaluatorProfileId);
 
         let parsed;
         try {
@@ -1404,61 +1520,92 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
         }
 
         if (transitionState.transitionActive) {
-            const completion = String(parsed?.decision || '').trim().toLowerCase();
+    const completion = String(parsed?.decision || '').trim().toLowerCase();
+    const transitionDecision = completion === 'complete' ? 'complete' : 'incomplete';
+    const transitionReason = String(parsed?.reason || '').trim();
+    const transitionConfidence = Number(parsed?.confidence);
+    const sourceTitle = transitionState.source?.title || '';
+    const destinationTitle = transitionState.destination?.title || '';
 
-            trace_debug('EvaluateDestiniaProgress:transitionCompletionResult', {
-                decision: completion,
-                sourceId: transitionState.timeline.transitionFrom,
-                destinationId: transitionState.timeline.transitionTo,
-                sourceTitle: transitionState.source?.title || '',
-                destinationTitle: transitionState.destination?.title || '',
-            });
+    trace_debug('EvaluateDestiniaProgress:transitionCompletionResult', {
+        decision: transitionDecision,
+        sourceId: transitionState.timeline.transitionFrom,
+        destinationId: transitionState.timeline.transitionTo,
+        sourceTitle,
+        destinationTitle,
+        reason: transitionReason,
+        confidence: Number.isFinite(transitionConfidence) ? transitionConfidence : null,
+    });
 
-            const diagnostic = {
-                current_plot_title: transitionState.source?.title || '',
-                objective_completion: [],
-                objectives: [],
-                objective_reasons: [],
-                did_advance: false,
-            };
+    const diagnostic = {
+        current_plot_title: sourceTitle,
+        objective_completion: [],
+        objectives: [],
+        objective_reasons: [],
+        did_advance: false,
+        transition: {
+            // This is a per-message diagnostic snapshot, not the live Timeline JSON state.
+            was_active: true,
+            decision: transitionDecision,
+            completed: transitionDecision === 'complete',
+            source_id: transitionState.timeline.transitionFrom || '',
+            destination_id: transitionState.timeline.transitionTo || '',
+            source_title: sourceTitle,
+            destination_title: destinationTitle,
+            source_summary: transitionState.source?.summary || '',
+            destination_summary: transitionState.destination?.summary || '',
+            transition_guidance: transitionState.source?.transitionGuidance || '',
+            reason: transitionReason || 'No transition-specific reason recorded.',
+            confidence: Number.isFinite(transitionConfidence) ? transitionConfidence : null,
+        },
+    };
 
-            if (completion === 'complete' && transitionState.destination) {
-                const timeline = getDestiniaTimeline();
+    if (transitionDecision === 'complete' && transitionState.destination) {
+        const timeline = getDestiniaTimeline();
 
-                trace_debug('TransitionStateWriteback:start', {
-                    previousCurrentPlotPoint: timeline.currentPlotPoint,
-                    previousTransitionFrom: timeline.transitionFrom,
-                    previousTransitionTo: timeline.transitionTo,
-                    destinationId: transitionState.destination.id,
-                });
+        trace_debug('TransitionStateWriteback:start', {
+            previousCurrentPlotPoint: timeline.currentPlotPoint,
+            previousTransitionFrom: timeline.transitionFrom,
+            previousTransitionTo: timeline.transitionTo,
+            destinationId: transitionState.destination.id,
+        });
 
-                timeline.currentPlotPoint = transitionState.destination.id;
-                timeline.transitionFrom = null;
-                timeline.transitionTo = null;
+        timeline.currentPlotPoint = transitionState.destination.id;
+        timeline.transitionFrom = null;
+        timeline.transitionTo = null;
 
-                const nextTimelineText = JSON.stringify(timeline, null, 2);
-                set_settings('timeline_text', nextTimelineText);
+        const nextTimelineText = JSON.stringify(timeline, null, 2);
+commitTimelineText(nextTimelineText);
 
-                trace_debug('TransitionStateWriteback:complete', {
-                    currentPlotPoint: timeline.currentPlotPoint,
-                    transitionFrom: timeline.transitionFrom,
-                    transitionTo: timeline.transitionTo,
-                });
+        trace_debug('TransitionStateWriteback:complete', {
+            currentPlotPoint: timeline.currentPlotPoint,
+            transitionFrom: timeline.transitionFrom,
+            transitionTo: timeline.transitionTo,
+        });
 
-                diagnostic.did_advance = true;
-            }
+        diagnostic.did_advance = true;
+        diagnostic.current_plot_title = destinationTitle || sourceTitle;
+    }
 
-            if (resolvedTargetMessage) {
-                const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
-                set_data(resolvedTargetMessage, 'current_plot_title', transitionState.source?.title || '');
-                set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
-                finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
-            }
+    if (resolvedTargetMessage) {
+        const targetIndex = getContext().chat.indexOf(resolvedTargetMessage);
+        set_data(resolvedTargetMessage, 'current_plot_title', diagnostic.current_plot_title || '');
+        set_data(resolvedTargetMessage, 'diagnostic', diagnostic);
+        finishing_diagnostic_index = targetIndex >= 0 ? targetIndex : null;
 
-            markEvaluationSucceeded(evaluationKey);
-            render_status_panel();
-            return parsed;
-        }
+        trace_debug('EvaluateDestiniaProgress:transitionAttached', {
+            targetIsUser: Boolean(resolvedTargetMessage?.is_user),
+            targetName: resolvedTargetMessage?.name || '',
+            targetIndex,
+            transition: diagnostic.transition,
+            didAdvance: diagnostic.did_advance,
+        });
+    }
+
+    markEvaluationSucceeded(evaluationKey);
+    render_status_panel();
+    return parsed;
+}
 
         const rawDecision = String(parsed?.decision || '').trim().toLowerCase();
         const decision = rawDecision === 'advance' || rawDecision === 'progress' ? 'progress' : 'stagnate';
@@ -1514,7 +1661,7 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
             timeline.transitionTo = destination?.id || null;
 
             const nextTimelineText = JSON.stringify(timeline, null, 2);
-            set_settings('timeline_text', nextTimelineText);
+commitTimelineText(nextTimelineText);
 
             trace_debug('TransitionStateWriteback:complete', {
                 currentPlotPoint: timeline.currentPlotPoint,
@@ -1548,7 +1695,8 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
             transitionActive: transitionState.transitionActive,
             targetIsUser: Boolean(resolvedTargetMessage?.is_user),
             targetName: resolvedTargetMessage?.name || '',
-            evaluatorProfile,
+            evaluatorProfileId,
+            evaluatorProfileName: evaluatorProfileRecord?.name || '',
             evaluatorPreset,
             activeEvaluationKey,
             errorName: error?.name || '',
@@ -1575,26 +1723,10 @@ async function evaluateDestiniaProgressUnlocked(targetMessage = null) {
             update_all_message_visuals();
         }, 1500);
 
-        const profileRestoreOk = await set_connection_profile(currentProfile, {
-            warn: false,
-            verifyAfter: true,
-            reason: 'restore',
-        });
-
-        const presetRestoreOk = await set_preset(currentPreset, {
-            warn: false,
-            verifyAfter: true,
-            profileName: currentProfile,
-            reason: 'restore',
-        });
-
-        trace_debug('EvaluateDestiniaProgress:restore', {
-            requestedRestoreProfile: currentProfile,
-            requestedRestorePreset: currentPreset,
-            profileRestoreOk,
-            presetRestoreOk,
-            actualProfileAfterRestore: await get_current_connection_profile(),
-            actualPresetAfterRestore: get_current_preset(),
+        trace_debug('EvaluateDestiniaProgress:cleanup', {
+            globalProfileSwitchingUsed: false,
+            evaluatorProfileId,
+            evaluatorProfileName: evaluatorProfileRecord?.name || '',
         });
 
         activeEvaluationKey = '';
@@ -2313,97 +2445,151 @@ function add_i18n($element=null) {
     })
 }
 
-// Completion presets
+// Completion presets + Connection Manager evaluator request helpers
+
 function normalizeSwitchName(name) {
     return String(name ?? '').trim();
 }
 
 function get_current_preset() {
-    // Get the currently selected completion preset.
     return getPresetManager().getSelectedPresetName();
 }
 
-async function get_evaluator_preset(profileName = null) {
-    // Blank evaluator preset means "use whatever preset is currently active".
-    const configuredPreset = normalizeSwitchName(get_settings('evaluator_preset'));
-
-    if (!configuredPreset) {
-        return get_current_preset();
-    }
-
-    const targetProfile = profileName ?? await get_evaluator_connection_profile();
-    const valid = await verify_preset(configuredPreset, targetProfile);
-
-    if (valid) {
-        return configuredPreset;
-    }
-
-    toast_debounced(`Your selected evaluator preset "${configuredPreset}" is not valid for the evaluator connection profile. Falling back to the current preset.`, 'warning');
-    return get_current_preset();
+function getConnectionManagerRequestService() {
+    const context = getContext();
+    return context?.ConnectionManagerRequestService || null;
 }
 
-async function set_preset(name, options = {}) {
-    const {
-        warn = true,
-        verifyAfter = true,
-        profileName = null,
-        reason = '',
-    } = options;
+function getConnectionManagerProfiles() {
+    const context = getContext();
+    const service = getConnectionManagerRequestService();
 
-    const targetPreset = normalizeSwitchName(name);
-
-    // Blank means "no dedicated preset switch". Never issue `/preset `.
-    if (!targetPreset) {
-        debug('Skipping completion preset switch because no preset name was provided', { reason });
-        return true;
-    }
-
-    const currentPreset = get_current_preset();
-    if (targetPreset === currentPreset) {
-        return true;
-    }
-
-    const valid = await verify_preset(targetPreset, profileName);
-    if (!valid) {
-        if (warn) {
-            toast_debounced(`Completion preset "${targetPreset}" is not valid${profileName ? ` for profile "${profileName}"` : ''}.`, 'warning');
+    try {
+        if (service?.getSupportedProfiles) {
+            const profiles = service.getSupportedProfiles();
+            if (Array.isArray(profiles)) {
+                return profiles
+                    .map(profile => ({
+                        ...profile,
+                        id: normalizeSwitchName(profile?.id),
+                        name: normalizeSwitchName(profile?.name),
+                    }))
+                    .filter(profile => profile.id && profile.name);
+            }
         }
-        debug('Skipping invalid completion preset switch', {
-            requestedPreset: targetPreset,
-            profileName,
-            reason,
+    } catch (err) {
+        debug('ConnectionManagerRequestService.getSupportedProfiles failed', {
+            errorName: err?.name || '',
+            errorMessage: err?.message || String(err || ''),
         });
-        return false;
     }
 
-    debug(`Setting completion preset to "${targetPreset}"`, { reason });
-    if (get_settings('debug_mode')) {
-        toastr.info(`Setting completion preset to "${targetPreset}"`);
-    }
+    const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+    if (!Array.isArray(profiles)) return [];
 
-    const ctx = getContext();
-    await ctx.executeSlashCommandsWithOptions(`/preset ${targetPreset}`);
-
-    if (verifyAfter) {
-        const actualPreset = get_current_preset();
-        if (actualPreset !== targetPreset) {
-            trace_debug('PresetSwitch:verifyMismatch', {
-                requestedPreset: targetPreset,
-                actualPreset,
-                profileName,
-                reason,
-            });
-            return false;
-        }
-    }
-
-    return true;
+    return profiles
+        .map(profile => ({
+            ...profile,
+            id: normalizeSwitchName(profile?.id),
+            name: normalizeSwitchName(profile?.name),
+        }))
+        .filter(profile => profile.id && profile.name);
 }
 
-async function get_presets(profileName = null) {
-    // Get the list of available completion presets for the given profile's API.
-    // If no profile is supplied, use the current active API.
-    const api = profileName ? await get_connection_profile_api(profileName) : undefined;
+function getConnectionProfileRecordById(profileId) {
+    const targetId = normalizeSwitchName(profileId);
+    if (!targetId) return null;
+
+    return getConnectionManagerProfiles().find(profile => profile.id === targetId) || null;
+}
+
+function getEvaluatorConnectionProfileId() {
+    return normalizeSwitchName(get_settings('evaluator_connection_profile'));
+}
+
+function isConnectionManagerAvailable() {
+    const service = getConnectionManagerRequestService();
+    const context = getContext();
+
+    if (!service) return false;
+    if (context?.extensionSettings?.disabledExtensions?.includes?.('connection-manager')) return false;
+
+    return getConnectionManagerProfiles().length > 0;
+}
+
+let connection_profiles_active = false;
+let connection_profiles_ready = false;
+let connectionManagerDetectTraceSignature = '';
+
+function getConnectionManagerDiagnosticSnapshot() {
+    const service = getConnectionManagerRequestService();
+    const profiles = getConnectionManagerProfiles().map(profile => ({
+        id: profile.id,
+        name: profile.name,
+        api: profile.api || '',
+        preset: profile.preset || '',
+    }));
+
+    return {
+        active: connection_profiles_active,
+        ready: connection_profiles_ready,
+        hasService: Boolean(service),
+        hasHandleDropdown: Boolean(service?.handleDropdown),
+        hasSendRequest: Boolean(service?.sendRequest),
+        profileCount: profiles.length,
+        selectedEvaluatorProfileId: getEvaluatorConnectionProfileId(),
+        profiles,
+    };
+}
+
+function getConnectionManagerDetectSignature(snapshot) {
+    return JSON.stringify({
+        active: snapshot.active,
+        ready: snapshot.ready,
+        hasService: snapshot.hasService,
+        hasHandleDropdown: snapshot.hasHandleDropdown,
+        hasSendRequest: snapshot.hasSendRequest,
+        profileCount: snapshot.profileCount,
+        selectedEvaluatorProfileId: snapshot.selectedEvaluatorProfileId,
+        profiles: snapshot.profiles.map(profile => `${profile.id}:${profile.name}:${profile.api}:${profile.preset}`),
+    });
+}
+
+function traceConnectionManagerDetectionIfChanged(snapshot, options = {}) {
+    const signature = getConnectionManagerDetectSignature(snapshot);
+    const force = Boolean(options.force);
+
+    if (!force && signature === connectionManagerDetectTraceSignature) {
+        return;
+    }
+
+    connectionManagerDetectTraceSignature = signature;
+    trace_debug('ConnectionManager:detect', snapshot);
+}
+
+async function detect_connection_profiles_active(options = {}) {
+    connection_profiles_active = isConnectionManagerAvailable();
+    connection_profiles_ready = true;
+
+    traceConnectionManagerDetectionIfChanged(getConnectionManagerDiagnosticSnapshot(), options);
+
+    return connection_profiles_active;
+}
+
+function check_connection_profiles_active() {
+    return isConnectionManagerAvailable();
+}
+
+function getConnectionProfileApi(profileId = '') {
+    const profile = getConnectionProfileRecordById(profileId);
+    if (!profile?.api) return undefined;
+
+    const apiMap = CONNECT_API_MAP[profile.api];
+    return apiMap?.selected;
+}
+
+async function get_presets(profileId = '') {
+    const api = profileId ? getConnectionProfileApi(profileId) : undefined;
     const result = getPresetManager().getPresetList(api) || {};
     const presetNames = result.preset_names;
 
@@ -2418,239 +2604,174 @@ async function get_presets(profileName = null) {
     return [];
 }
 
-async function verify_preset(name, profileName = null) {
+async function verify_preset(name, profileId = '') {
     const targetPreset = normalizeSwitchName(name);
-    if (!targetPreset) return false;
 
-    const presetNames = await get_presets(profileName);
+    // Blank evaluator preset is valid; it means "use current preset/default behavior".
+    if (!targetPreset) return true;
+
+    const presetNames = await get_presets(profileId);
     return Array.isArray(presetNames) && presetNames.includes(targetPreset);
 }
 
 async function check_preset_valid(name = get_settings('evaluator_preset'), options = {}) {
-    const { warn = true, profileName = null } = options;
+    const { warn = true, profileId = getEvaluatorConnectionProfileId() } = options;
     const targetPreset = normalizeSwitchName(name);
 
-    // Blank evaluator preset is allowed because it means "fallback to current".
     if (!targetPreset) return true;
 
-    const valid = await verify_preset(targetPreset, profileName);
+    const valid = await verify_preset(targetPreset, profileId);
     if (!valid && warn) {
-        toast_debounced(`Your selected evaluator preset "${targetPreset}" is not valid for the selected API.`, 'warning');
+        toast_debounced(`Your selected evaluator preset "${targetPreset}" is not valid for the selected evaluator profile.`, 'warning');
     }
 
     return valid;
 }
 
-async function get_evaluator_preset_max_tokens() {
-    // Get the maximum token length for the chosen evaluator preset.
-    const evaluatorProfile = await get_evaluator_connection_profile();
-    const presetName = await get_evaluator_preset(evaluatorProfile);
+async function get_evaluator_preset(profileId = getEvaluatorConnectionProfileId()) {
+    const configuredPreset = normalizeSwitchName(get_settings('evaluator_preset'));
+
+    if (!configuredPreset) {
+        return get_current_preset();
+    }
+
+    const valid = await verify_preset(configuredPreset, profileId);
+    if (valid) {
+        return configuredPreset;
+    }
+
+    toast_debounced(`Your selected evaluator preset "${configuredPreset}" is not valid for the selected evaluator profile. Falling back to the current preset.`, 'warning');
+    return get_current_preset();
+}
+
+async function get_evaluator_preset_max_tokens(profileId = getEvaluatorConnectionProfileId()) {
+    const presetName = await get_evaluator_preset(profileId);
     const preset = getPresetManager().getCompletionPresetByName(presetName);
 
-    // If the preset doesn't have a generation amount, use the current generation amount.
     const maxTokens = preset?.genamt || preset?.openai_max_tokens || amount_gen;
-    debug(`Got evaluator preset genamt: ${maxTokens}`);
+    debug(`Got evaluator preset max tokens: ${maxTokens}`);
 
     return maxTokens;
 }
 
-// Connection profiles
-let connection_profiles_active;
-let connection_profiles_ready = false;
-
-async function detect_connection_profiles_active() {
-    try {
-        const ctx = getContext();
-        const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
-        const parsed = JSON.parse(String(result?.pipe || '[]'));
-        connection_profiles_active = Array.isArray(parsed);
-        connection_profiles_ready = true;
-    } catch {
-        if (connection_profiles_ready !== true) {
-            connection_profiles_active = false;
-        }
-    }
-
-    return connection_profiles_active;
-}
-
-function check_connection_profiles_active() {
-    if (connection_profiles_ready !== true) {
-        return false;
-    }
-
-    return connection_profiles_active === true;
-}
-
+// These are intentionally no-ops now. Destinia no longer mutates SillyTavern's global
+// connection profile or completion preset, because this build does not expose /profile commands.
 async function get_current_connection_profile() {
-    if (!check_connection_profiles_active()) return '';
-
-    const ctx = getContext();
-    const result = await ctx.executeSlashCommandsWithOptions('/profile');
-    return normalizeSwitchName(result?.pipe);
-}
-
-async function get_connection_profile_api(name = null) {
-    if (!check_connection_profiles_active()) return undefined;
-
-    const profileName = normalizeSwitchName(name || await get_current_connection_profile());
-    if (!profileName) return undefined;
-
-    const ctx = getContext();
-    const result = await ctx.executeSlashCommandsWithOptions(`/profile-get ${profileName}`);
-
-    if (!result?.pipe) {
-        debug(`/profile-get ${profileName} returned nothing - no connection profile selected`);
-        return undefined;
-    }
-
-    let data;
-    try {
-        data = JSON.parse(result.pipe);
-    } catch {
-        error(`Failed to parse JSON from /profile-get for "${profileName}". Result:`);
-        error(result);
-        return undefined;
-    }
-
-    // If the API type isn't defined, it might be excluded from the connection profile. Assume based on mode.
-    if (data.api === undefined) {
-        debug(`API not defined in connection profile "${profileName}". Mode is ${data.mode}`);
-        if (data.mode === 'tc') return 'textgenerationwebui';
-        if (data.mode === 'cc') return 'openai';
-    }
-
-    if (CONNECT_API_MAP[data.api] === undefined) {
-        error(`API type "${data.api}" not found in CONNECT_API_MAP - could not identify API.`);
-        return undefined;
-    }
-
-    return CONNECT_API_MAP[data.api].selected;
+    return '';
 }
 
 async function get_evaluator_connection_profile() {
-    // Blank evaluator profile means "use whatever profile is currently active".
-    const configuredProfile = normalizeSwitchName(get_settings('evaluator_connection_profile'));
-
-    if (!check_connection_profiles_active()) {
-        return await get_current_connection_profile();
-    }
-
-    if (!configuredProfile) {
-        return await get_current_connection_profile();
-    }
-
-    const valid = await verify_connection_profile(configuredProfile);
-    if (valid) {
-        return configuredProfile;
-    }
-
-    toast_debounced(`Your selected evaluator connection profile "${configuredProfile}" is not valid. Falling back to the current connection profile.`, 'warning');
-    return await get_current_connection_profile();
+    return getEvaluatorConnectionProfileId();
 }
 
-async function set_connection_profile(name, options = {}) {
-    const {
-        warn = true,
-        verifyAfter = true,
-        reason = '',
-    } = options;
+async function set_connection_profile(_profileIdOrName, options = {}) {
+    debug('Skipping global connection profile switch; evaluator uses ConnectionManagerRequestService.sendRequest when a profile is selected.', {
+        reason: options?.reason || '',
+    });
+    return true;
+}
 
-    if (!check_connection_profiles_active()) {
-        return true;
-    }
+async function set_preset(_name, options = {}) {
+    debug('Skipping global preset switch; evaluator uses ConnectionManagerRequestService.sendRequest when a profile is selected.', {
+        reason: options?.reason || '',
+    });
+    return true;
+}
 
-    const targetProfile = normalizeSwitchName(name);
+async function get_connection_profiles() {
+    return getConnectionManagerProfiles().map(profile => profile.id);
+}
 
-    // Blank means "no dedicated profile switch". Never issue `/profile `.
-    if (!targetProfile) {
-        debug('Skipping connection profile switch because no profile name was provided', { reason });
-        return true;
-    }
+async function verify_connection_profile(profileId) {
+    const targetId = normalizeSwitchName(profileId);
+    if (!targetId) return true;
 
-    const currentProfile = await get_current_connection_profile();
-    if (targetProfile === currentProfile) {
-        return true;
-    }
+    return Boolean(getConnectionProfileRecordById(targetId));
+}
 
-    const valid = await verify_connection_profile(targetProfile);
-    if (!valid) {
+async function check_connection_profile_valid(profileId = getEvaluatorConnectionProfileId(), options = {}) {
+    const { warn = true } = options;
+    const targetId = normalizeSwitchName(profileId);
+
+    if (!targetId) return true;
+
+    const profile = getConnectionProfileRecordById(targetId);
+    if (!profile) {
         if (warn) {
-            toast_debounced(`Connection profile "${targetProfile}" is not valid.`, 'warning');
+            toast_debounced('Your selected evaluator connection profile no longer exists.', 'warning');
         }
-        debug('Skipping invalid connection profile switch', {
-            requestedProfile: targetProfile,
-            reason,
+
+        trace_debug('EvaluatorConnectionProfileSetting:invalidId', {
+            profileId: targetId,
+            availableProfiles: getConnectionManagerProfiles().map(item => ({
+                id: item.id,
+                name: item.name,
+                api: item.api || '',
+                preset: item.preset || '',
+            })),
         });
+
         return false;
-    }
-
-    debug(`Setting connection profile to "${targetProfile}"`, { reason });
-    if (get_settings('debug_mode')) {
-        toastr.info(`Setting connection profile to "${targetProfile}"`);
-    }
-
-    const ctx = getContext();
-    await ctx.executeSlashCommandsWithOptions(`/profile ${targetProfile}`);
-
-    if (verifyAfter) {
-        const actualProfile = await get_current_connection_profile();
-        if (actualProfile !== targetProfile) {
-            trace_debug('ConnectionProfileSwitch:verifyMismatch', {
-                requestedProfile: targetProfile,
-                actualProfile,
-                reason,
-            });
-            return false;
-        }
     }
 
     return true;
 }
 
-async function get_connection_profiles() {
-    if (!check_connection_profiles_active()) return [];
+function extractEvaluatorResponseText(response) {
+    if (typeof response === 'string') return response;
 
-    const ctx = getContext();
-    const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
-
-    try {
-        const parsed = JSON.parse(String(result?.pipe || '[]'));
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        error('Failed to parse JSON from /profile-list. Result:');
-        error(result);
-        return [];
-    }
-}
-
-async function verify_connection_profile(name) {
-    const targetProfile = normalizeSwitchName(name);
-    if (!targetProfile) return false;
-    if (!check_connection_profiles_active()) return false;
-
-    const names = await get_connection_profiles();
-    return Array.isArray(names) && names.includes(targetProfile);
-}
-
-async function check_connection_profile_valid(name = get_settings('evaluator_connection_profile'), options = {}) {
-    const { warn = true } = options;
-    const targetProfile = normalizeSwitchName(name);
-
-    // Blank evaluator profile is allowed because it means "fallback to current".
-    if (!targetProfile) return true;
-
-    if (!check_connection_profiles_active()) return true;
-
-    const valid = await verify_connection_profile(targetProfile);
-    if (!valid && warn) {
-        toast_debounced(`Your selected evaluator connection profile "${targetProfile}" is not valid.`, 'warning');
+    if (response && typeof response === 'object') {
+        if (typeof response.content === 'string') return response.content;
+        if (typeof response.text === 'string') return response.text;
+        if (typeof response.message === 'string') return response.message;
+        if (typeof response.output_text === 'string') return response.output_text;
+        if (typeof response?.message?.content === 'string') return response.message.content;
+        if (typeof response?.choices?.[0]?.message?.content === 'string') return response.choices[0].message.content;
+        if (typeof response?.choices?.[0]?.text === 'string') return response.choices[0].text;
+        if (response.data) return extractEvaluatorResponseText(response.data);
     }
 
-    return valid;
+    return String(response ?? '');
 }
 
+async function sendEvaluatorRequest(prompt, profileId = '') {
+    const targetProfileId = normalizeSwitchName(profileId);
+    const service = getConnectionManagerRequestService();
+    const profile = targetProfileId ? getConnectionProfileRecordById(targetProfileId) : null;
 
+    if (targetProfileId && profile && service?.sendRequest) {
+        const maxTokens = await get_evaluator_preset_max_tokens(targetProfileId);
+
+        trace_debug('EvaluatorRequest:connectionManager', {
+            profileId: profile.id,
+            profileName: profile.name,
+            profileApi: profile.api || '',
+            profilePreset: profile.preset || '',
+            requestedPreset: get_settings('evaluator_preset') || '',
+            maxTokens,
+        });
+
+        const response = await service.sendRequest(profile.id, prompt, maxTokens, {
+            extractData: true,
+            includePreset: true,
+            includeInstruct: true,
+        });
+
+        return extractEvaluatorResponseText(response);
+    }
+
+    trace_debug('EvaluatorRequest:generateRawFallback', {
+        reason: targetProfileId ? 'Connection Manager profile/service unavailable' : 'No evaluator profile selected',
+        profileId: targetProfileId,
+        hasService: Boolean(service),
+        hasSendRequest: Boolean(service?.sendRequest),
+    });
+
+    return await generateRaw({
+        prompt,
+        trimNames: false,
+    });
+}
 
 // Settings Management
 function initialize_settings() {
@@ -2668,7 +2789,7 @@ function initialize_settings() {
 function hard_reset_settings() {
     // Set the settings to the completely fresh values, deleting all profiles too
     if (global_settings['profiles']['Default'] === undefined) {  // if the default profile doesn't exist, create it
-        global_settings['profiles']['Default'] = structuredClone(default_settings);
+        global_settings['profiles']['Default'] = stripTimelineStateFromProfileSettings(default_settings);
     }
     extension_settings[MODULE_NAME] = structuredClone({
         ...default_settings,
@@ -2686,12 +2807,14 @@ function soft_reset_settings() {
     // check for any missing profiles
     let profiles = get_settings('profiles');
     if (Object.keys(profiles).length === 0) {
-        log("No profiles found, creating default profile.")
-        profiles['Default'] = structuredClone(default_settings);
+    log("No profiles found, creating default profile.")
+        profiles['Default'] = stripTimelineStateFromProfileSettings(default_settings);
         set_settings('profiles', profiles);
-    } else { // for each existing profile, add any missing default settings without overwriting existing settings
+} else { // for each existing profile, add any missing default settings without overwriting existing settings
         for (let [profile, settings] of Object.entries(profiles)) {
-            profiles[profile] = Object.assign(structuredClone(default_settings), settings);
+            profiles[profile] = stripTimelineStateFromProfileSettings(
+            Object.assign(structuredClone(default_settings), settings)
+            );
         }
         set_settings('profiles', profiles);
     }
@@ -2878,6 +3001,55 @@ function bind_setting(selector, key, type=null, callback=null, disable=true) {
         }
     });
 }
+function bindTimelineEditor() {
+    const selector = `.${settings_content_class} #timeline_text`;
+    const element = $(selector);
+
+    if (element.length === 0) {
+        error(`No element found for selector [${selector}] for setting [timeline_text]`);
+        return;
+    }
+
+    settings_ui_map.timeline_text = [element, 'text'];
+    element.addClass('settings_input');
+
+    set_setting_ui_element('timeline_text', element, 'text');
+
+    element
+        .off('input.aspectDestiniaTimelineEditor change.aspectDestiniaTimelineEditor')
+        .on('input.aspectDestiniaTimelineEditor', function () {
+            const rawTimelineText = String($(this).val() || '');
+            const timelineResult = getValidatedTimelineText(rawTimelineText);
+
+            updateFieldValidationIndicators();
+
+            // Do not poison the live source with invalid partial JSON.
+            // Once the JSON becomes valid, it immediately becomes the source of truth.
+            if (!timelineResult.valid) {
+                updateTimelinePresetControls();
+                return;
+            }
+
+            commitTimelineText(rawTimelineText, {
+                updateEditor: false,
+                refreshGuidanceNow: false,
+                refreshStatusNow: true,
+                showInvalidToast: false,
+            });
+
+            refresh_guidance_debounced();
+        })
+        .on('change.aspectDestiniaTimelineEditor', function () {
+            const rawTimelineText = String($(this).val() || '');
+
+            commitTimelineText(rawTimelineText, {
+                updateEditor: true,
+                refreshGuidanceNow: true,
+                refreshStatusNow: true,
+                showInvalidToast: true,
+            });
+        });
+}
 function bind_function(selector, func, disable=true) {
     // bind a function to an element (typically a button or input)
     // if disable is true, disable the element if chat is disabled
@@ -3001,9 +3173,21 @@ function updateTimelinePresetControls() {
     const hasPreset = Boolean(presetId);
     const isDefaultPreset = presetId === 'default_timeline_preset';
     const presets = get_settings('timeline_presets', true) || {};
-    const presetTimelineText = String(presets[presetId]?.timelineText || '');
-    const editorTimelineText = String(timelineElement?.value || get_settings('timeline_text') || '');
-    const hasUnsavedTimelineChanges = hasPreset && editorTimelineText !== presetTimelineText;
+    const rawPresetTimelineText = String(presets[presetId]?.timelineText || '');
+const rawEditorTimelineText = String(timelineElement?.value || get_settings('timeline_text') || '');
+
+const presetTimelineResult = getValidatedTimelineText(rawPresetTimelineText);
+const editorTimelineResult = getValidatedTimelineText(rawEditorTimelineText);
+
+const presetTimelineText = presetTimelineResult.valid
+    ? presetTimelineResult.timelineText
+    : rawPresetTimelineText;
+
+const editorTimelineText = editorTimelineResult.valid
+    ? editorTimelineResult.timelineText
+    : rawEditorTimelineText;
+
+const hasUnsavedTimelineChanges = hasPreset && editorTimelineText !== presetTimelineText;
 
     if (renameButton) {
         renameButton.disabled = !hasPreset;
@@ -3022,50 +3206,138 @@ function updateTimelinePresetControls() {
         exportButton.disabled = !hasPreset;
     }
 }
+
 async function update_preset_dropdown() {
-    let $preset_select = $(`.${settings_content_class} #evaluator_preset`);
+    const $preset_select = $(`.${settings_content_class} #evaluator_preset`);
     if ($preset_select.length === 0) return;
+
     const presetElement = $preset_select.get(0);
     const selectedPreset = get_settings('evaluator_preset');
-    const preset_options = await get_presets();
+    const evaluatorProfileId = getEvaluatorConnectionProfileId();
+    const preset_options = await get_presets(evaluatorProfileId);
+
     if (document.activeElement !== presetElement) {
         $preset_select.empty();
         $preset_select.append(`<option value="">${t`Same as Current`}</option>`);
-        for (let option of preset_options) {
-            $preset_select.append(`<option value="${option}">${option}</option>`);
+
+        for (const option of preset_options) {
+            $preset_select.append(`<option value="${clean_string_for_html(option)}">${clean_string_for_html(option)}</option>`);
         }
+
         $preset_select.val(selectedPreset);
     }
-    $preset_select.off('click').on('click', () => update_preset_dropdown());
+
+    $preset_select.off('click.aspectDestiniaPreset').on('click.aspectDestiniaPreset', () => update_preset_dropdown());
 }
+
 function get_saved_evaluator_connection_profile_id() {
-    const context = getContext();
-    const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
-    const savedName = String(get_settings('evaluator_connection_profile') || '');
-    if (!savedName) return '';
-    const profile = profiles.find((item) => item?.name === savedName);
+    const savedId = getEvaluatorConnectionProfileId();
+    if (!savedId) return '';
+
+    const profile = getConnectionProfileRecordById(savedId);
     return profile?.id || '';
 }
+
+function setEvaluatorConnectionProfileId(profileId) {
+    const cleanId = normalizeSwitchName(profileId);
+    const profile = cleanId ? getConnectionProfileRecordById(cleanId) : null;
+    const nextId = profile?.id || '';
+
+    const previousId = getEvaluatorConnectionProfileId();
+    if (nextId === previousId) return;
+
+    set_settings('evaluator_connection_profile', nextId);
+
+    trace_debug('EvaluatorConnectionProfileSetting:changed', {
+        previousId,
+        nextId,
+        selectedProfileName: profile?.name || '',
+        availableProfiles: getConnectionManagerProfiles().map(item => ({
+            id: item.id,
+            name: item.name,
+            api: item.api || '',
+            preset: item.preset || '',
+        })),
+    });
+
+    update_preset_dropdown();
+    check_connection_profile_valid(nextId);
+}
+
 function initialize_connection_profile_dropdown() {
     const selector = `.${settings_content_class} #evaluator_connection_profile`;
-    const context = getContext();
-    const requestService = context.ConnectionManagerRequestService;
-    if (!requestService?.handleDropdown) return false;
-
     const $connectionSelect = $(selector);
     if (!$connectionSelect.length) return false;
 
+    const service = getConnectionManagerRequestService();
+    const profiles = getConnectionManagerProfiles();
+    const savedId = getEvaluatorConnectionProfileId();
+    const selectedId = get_saved_evaluator_connection_profile_id();
+
+    if (!service?.handleDropdown || profiles.length === 0) {
+        connection_profiles_active = false;
+        connection_profiles_ready = true;
+
+        trace_debug('ConnectionManagerDropdown:unavailable', {
+            hasService: Boolean(service),
+            hasHandleDropdown: Boolean(service?.handleDropdown),
+            profileCount: profiles.length,
+        });
+
+        return false;
+    }
+
+    // If the saved value is not a valid profile ID, clear it. Do not attempt old name recovery.
+    if (savedId && !selectedId) {
+        trace_debug('EvaluatorConnectionProfileSetting:clearedInvalidId', {
+            savedId,
+            availableProfiles: profiles.map(item => ({
+                id: item.id,
+                name: item.name,
+                api: item.api || '',
+                preset: item.preset || '',
+            })),
+        });
+
+        set_settings('evaluator_connection_profile', '');
+    }
+
     if ($connectionSelect.data('aspectDestiniaCmBound') === true) {
-        $connectionSelect.val(get_saved_evaluator_connection_profile_id());
+        $connectionSelect.val(selectedId);
+        connection_profiles_active = true;
+        connection_profiles_ready = true;
         return true;
     }
 
-    requestService.handleDropdown(selector, get_saved_evaluator_connection_profile_id(), (profile) => {
-        set_settings('evaluator_connection_profile', profile?.name || '');
-    });
+    service.handleDropdown(
+        selector,
+        selectedId,
+        (profile) => {
+            setEvaluatorConnectionProfileId(profile?.id || '');
+        },
+        (profile) => {
+            setEvaluatorConnectionProfileId(profile?.id || '');
+        },
+        (oldProfile, newProfile) => {
+            const currentId = getEvaluatorConnectionProfileId();
+            if (currentId && oldProfile?.id === currentId) {
+                setEvaluatorConnectionProfileId(newProfile?.id || '');
+            }
+        },
+        (profile) => {
+            const currentId = getEvaluatorConnectionProfileId();
+            if (currentId && profile?.id === currentId) {
+                setEvaluatorConnectionProfileId('');
+            }
+        }
+    );
+
     $connectionSelect.data('aspectDestiniaCmBound', true);
+    connection_profiles_active = true;
+    connection_profiles_ready = true;
     return true;
 }
+
 function updateTimelinePresetDropdown() {
     const $presetSelect = $(`.${settings_content_class} #timeline_preset`);
     if (!$presetSelect.length) return;
@@ -3155,9 +3427,7 @@ function stepPlotPoint(delta = 0) {
     timeline.transitionFrom = null;
     timeline.transitionTo = null;
     const nextTimelineText = JSON.stringify(timeline, null, 2);
-    set_settings('timeline_text', nextTimelineText);
-    render_status_panel();
-    refresh_guidance();
+commitTimelineText(nextTimelineText);
 }
 
 function resetPlotPointToFirst() {
@@ -3173,20 +3443,23 @@ function resetPlotPointToFirst() {
     timeline.transitionFrom = null;
     timeline.transitionTo = null;
     const nextTimelineText = JSON.stringify(timeline, null, 2);
-    set_settings('timeline_text', nextTimelineText);
-    render_status_panel();
-    refresh_guidance();
+commitTimelineText(nextTimelineText);
 }
 
 function saveSelectedTimelinePreset() {
-    const presetId = get_settings('selected_timeline_preset');
-    const presets = get_settings('timeline_presets', true) || {};
-    if (!presetId || !presets[presetId]) return;
-    const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
-    presets[presetId].timelineText = timelineResult.timelineText;
-    set_settings('timeline_text', timelineResult.timelineText);
-    set_settings('timeline_presets', presets);
-    refresh_settings_for_timeline_controls();
+    const editor = getTimelineEditorElement();
+    const rawTimelineText = editor ? String(editor.value || '') : String(get_settings('timeline_text') || '');
+
+    const saved = commitTimelineText(rawTimelineText, {
+        updateEditor: true,
+        refreshGuidanceNow: true,
+        refreshStatusNow: true,
+        showInvalidToast: true,
+    });
+
+    if (saved) {
+        toast('Timeline preset saved.', 'success');
+    }
 }
 
 async function deleteSelectedTimelinePreset() {
@@ -3197,11 +3470,14 @@ async function deleteSelectedTimelinePreset() {
     const confirmed = await getContext().Popup.show.confirm(`Delete timeline preset: "${presetName}"?`, '', { okButton: 'Delete', cancelButton: 'Cancel' });
     if (!confirmed) return;
     delete presets[presetId];
-    set_settings('timeline_presets', presets);
-    set_settings('selected_timeline_preset', 'default_timeline_preset');
-    set_settings('timeline_text', String(presets.default_timeline_preset?.timelineText || JSON.stringify(DEFAULT_TIMELINE_TEMPLATE, null, 2)));
-    refresh_settings_for_timeline_controls();
-    refresh_guidance();
+set_settings('timeline_presets', presets);
+set_settings('selected_timeline_preset', 'default_timeline_preset');
+
+syncTimelineTextFromSelectedPreset({
+    updateEditor: true,
+    refreshGuidanceNow: true,
+    refreshStatusNow: true,
+});
 }
 function exportTimelineToFile() {
     const timelineResult = getValidatedTimelineText(get_settings('timeline_text'));
@@ -3223,10 +3499,13 @@ async function importTimelineFromFile(event) {
             updateFieldValidationIndicators();
             return;
         }
-        set_settings('timeline_text', timelineResult.timelineText);
-        refresh_settings_for_timeline_controls();
-        refresh_guidance();
-        toast('Imported timeline from file.', 'success');
+        commitTimelineText(timelineResult.timelineText, {
+    updateEditor: true,
+    refreshGuidanceNow: true,
+    refreshStatusNow: true,
+});
+
+toast('Imported timeline into the selected timeline preset.', 'success');
     } finally {
         event.target.value = null;
     }
@@ -3315,8 +3594,26 @@ async function freshResetExtensionState() {
     }
     timeline.transitionFrom = null;
     timeline.transitionTo = null;
-    set_settings('timeline_text', JSON.stringify(timeline, null, 2));
-    resetTimelineObjectivesToFalse();
+    if (Array.isArray(timeline.plotPoints)) {
+    timeline.plotPoints = timeline.plotPoints.map((plotPoint) => {
+        if (!Array.isArray(plotPoint?.objectives)) return plotPoint;
+
+        return {
+            ...plotPoint,
+            objectives: plotPoint.objectives.map((objective) => {
+                const normalized = normalizeObjectiveItem(objective);
+                normalized.completed = false;
+                return normalized;
+            }),
+        };
+    });
+}
+
+commitTimelineText(JSON.stringify(timeline, null, 2), {
+    updateEditor: true,
+    refreshGuidanceNow: true,
+    refreshStatusNow: true,
+});
 
     const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
     for (const message of chat) {
@@ -3340,32 +3637,31 @@ async function freshResetExtensionState() {
     toast('Extension state reset for fresh testing.', 'success');
 }
 
-function apply_structural_settings_surfaces() {
-    // connection profiles
+async function apply_structural_settings_surfaces() {
+    await detect_connection_profiles_active();
+
     const connectionField = $(`.${settings_content_class} #evaluator_connection_profile`).closest('.aspect-destinia-field');
     const connectionDropdownReady = initialize_connection_profile_dropdown();
+
     if (connectionDropdownReady) {
         connectionField.show();
-        if (connection_profiles_ready === true && check_connection_profiles_active()) {
-            check_connection_profile_valid();
-        }
-    } else if (connection_profiles_ready !== true) {
-        connectionField.hide();
-        debug("Connection profiles not ready yet. Hiding evaluator connection profile dropdown.")
+        await check_connection_profile_valid();
     } else {
         connectionField.hide();
-        debug("Connection Manager dropdown service is unavailable. Hiding evaluator connection profile dropdown.")
+        debug('Connection Manager request service is unavailable. Hiding evaluator connection profile dropdown.');
     }
 
-    update_preset_dropdown()
-    check_preset_valid()
-    update_profile_section()
-    ensureDefaultTimelinePreset()
-    updateTimelinePresetDropdown()
+    await update_preset_dropdown();
+    await check_preset_valid();
+
+    update_profile_section();
+    ensureDefaultTimelinePreset();
+    updateTimelinePresetDropdown();
     addFieldResetButtons();
     addInfoTipsToSettings();
     setupInfoTooltips();
 }
+
 function apply_common_settings_surfaces() {
     update_save_icon_highlight();
     update_slider_displays();
@@ -3377,6 +3673,7 @@ function apply_common_settings_surfaces() {
         $(`.${settings_content_class} .settings_input`).prop('disabled', true);
     }
 }
+
 function sync_settings_ui_after_change() {
     apply_common_settings_surfaces();
 }
@@ -3502,6 +3799,10 @@ function copy_settings(profile=null) {
     for (let key of Object.keys(global_settings)) {
         delete settings[key];
     }
+
+    // hard guarantee: profiles never compare/save/load timeline state
+    settings = stripTimelineStateFromProfileSettings(settings);
+
     return settings;
 }
 function detect_settings_difference(profile=null) {
@@ -3520,10 +3821,8 @@ function save_profile(profile=null) {
     log("Saving Configuration Profile: "+profile);
 
     let profiles = get_settings('profiles');
-    const savedSettings = copy_settings();
-    const timelineResult = getValidatedTimelineText(savedSettings.timeline_text);
-    savedSettings.timeline_text = timelineResult.timelineText;
-    set_settings('timeline_text', timelineResult.timelineText);
+    const savedSettings = stripTimelineStateFromProfileSettings(copy_settings());
+
     profiles[profile] = savedSettings;
     set_settings('profiles', profiles);
 
@@ -3542,7 +3841,7 @@ function load_profile(profile=null) {
         return;
     }
 
-    settings = normalizeImportedProfile(settings);
+    settings = stripTimelineStateFromProfileSettings(normalizeImportedProfile(settings));
 
     let profiles = get_settings('profiles', true) || {};
     if (profiles[profile]) {
@@ -3551,7 +3850,10 @@ function load_profile(profile=null) {
     }
 
     log("Loading Configuration Profile: "+profile);
-    Object.assign(extension_settings[MODULE_NAME], settings);
+
+    // Profile load changes behavior/config only.
+    // It must not touch timeline_text, timeline_presets, or selected_timeline_preset.
+Object.assign(extension_settings[MODULE_NAME], settings);
     set_settings('profile', profile);
     if (get_settings("notify_on_profile_switch") && current_profile !== profile) {
         toast(`Switched to profile "${profile}"`, 'info')
@@ -3807,9 +4109,16 @@ function attach_current_chat_to_profile() {
     toast(`Attached current chat to profile "${profile}"`, 'success');
 }
 function auto_load_profile() {
-    // Load the settings profile for the current chat or character
+    // Load the settings profile for the current chat or character.
+    // Profiles configure extension behavior only; they must not own Timeline JSON.
     let profile = get_chat_profile() || get_character_profile();
     load_profile(profile || 'Default');
+
+    syncTimelineTextFromSelectedPreset({
+        updateEditor: true,
+        refreshGuidanceNow: true,
+        refreshStatusNow: true,
+    });
 }
 
 
@@ -3881,6 +4190,7 @@ function bindDiagnosticDrawerToggle($drawer) {
         }
     });
 }
+
 function update_message_visuals(i, style=true, text=null) {
     const div_element = get_message_div(i);
     if (!div_element) return;
@@ -3894,62 +4204,162 @@ function update_message_visuals(i, style=true, text=null) {
     const diagnostic = get_data(message, 'diagnostic') || null;
     const currentPlot = diagnostic?.current_plot_title || get_data(message, 'current_plot_title') || '';
     const hasDiagnosticPayload = Boolean(diagnostic);
+
     const objectiveState = Array.isArray(diagnostic?.objective_completion) ? diagnostic.objective_completion : [];
     const objectiveLabels = Array.isArray(diagnostic?.objectives) ? diagnostic.objectives : [];
     const objectiveReasons = Array.isArray(diagnostic?.objective_reasons) ? diagnostic.objective_reasons : [];
+
+    const transitionDiagnostic = diagnostic?.transition && typeof diagnostic.transition === 'object'
+        ? diagnostic.transition
+        : null;
+
+    const hasTransitionPayload = Boolean(
+        transitionDiagnostic
+        && transitionDiagnostic.was_active
+        && (
+            transitionDiagnostic.source_title
+            || transitionDiagnostic.destination_title
+            || transitionDiagnostic.decision
+            || transitionDiagnostic.reason
+        )
+    );
+
     const isLoadingDiagnostic = active_diagnostic_loading_index === i && !diagnostic;
     const isFinishingDiagnostic = finishing_diagnostic_index === i;
     const loadingProgress = isLoadingDiagnostic
         ? Math.max(0, Math.min(100, ((Date.now() - active_diagnostic_loading_started_at) / 12000) * 100))
         : 0;
 
-    if (!hasDiagnosticPayload && !currentPlot && !objectiveState.length && !text && !isLoadingDiagnostic) {
+    if (!hasDiagnosticPayload && !currentPlot && !objectiveState.length && !hasTransitionPayload && !text && !isLoadingDiagnostic) {
         return;
     }
 
     const liveCurrentPlot = getCurrentPlotPoint().current?.title || '';
     const message_element = div_element.find('div.mes_text');
     let rendered = text;
+
     if (!rendered) {
         const sections = [];
         const objectiveRows = [];
+
         if (objectiveState.length) {
             objectiveState.forEach((done, index) => {
                 const label = objectiveLabels[index] || `Objective ${index + 1}`;
                 const objectiveReason = objectiveReasons[index] || 'No objective-specific reason recorded.';
-                objectiveRows.push(`<div class="aspect-destinia-diagnostic-objective-entry"><div class="aspect-destinia-diagnostic-objective-titlebar">${getDiagnosticCheckboxSvg(done)}<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span></div><div class="aspect-destinia-diagnostic-objective-item"><div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div></div><div class="aspect-destinia-diagnostic-objective-reason">• <strong>Evaluation:</strong> ${clean_string_for_html(objectiveReason)}</div></div>`);
+
+                objectiveRows.push(
+                    `<div class="aspect-destinia-diagnostic-objective-entry">` +
+                        `<div class="aspect-destinia-diagnostic-objective-titlebar">` +
+                            `${getDiagnosticCheckboxSvg(done)}` +
+                            `<span class="aspect-destinia-diagnostic-objective-titletext">Objective</span>` +
+                        `</div>` +
+                        `<div class="aspect-destinia-diagnostic-objective-item">` +
+                            `<div class="aspect-destinia-diagnostic-objective-inline">${clean_string_for_html(label)}</div>` +
+                        `</div>` +
+                        `<div class="aspect-destinia-diagnostic-objective-reason">• <strong>Evaluation:</strong> ${clean_string_for_html(objectiveReason)}</div>` +
+                    `</div>`
+                );
             });
         }
 
         const statusParts = [];
+
         if (currentPlot) {
-            statusParts.push(`<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}</div>`);
+            statusParts.push(
+                `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                    `<strong>Plot Point:</strong> ${clean_string_for_html(currentPlot)}` +
+                `</div>`
+            );
         }
+
+        if (hasTransitionPayload) {
+            const sourceTitle = transitionDiagnostic.source_title || 'Unknown Source';
+            const destinationTitle = transitionDiagnostic.destination_title || 'Unknown Destination';
+            const decision = transitionDiagnostic.completed || transitionDiagnostic.decision === 'complete'
+                ? 'Complete'
+                : 'In Progress';
+            const confidence = Number.isFinite(Number(transitionDiagnostic.confidence))
+                ? ` (${Math.round(Number(transitionDiagnostic.confidence) * 100)}% confidence)`
+                : '';
+            const reason = transitionDiagnostic.reason || 'No transition-specific reason recorded.';
+            const guidance = transitionDiagnostic.transition_guidance || '';
+
+            statusParts.push(
+                `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                    `<strong>Transition:</strong> ${clean_string_for_html(sourceTitle)} → ${clean_string_for_html(destinationTitle)}` +
+                `</div>`
+            );
+
+            statusParts.push(
+                `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                    `<strong>Transition Status:</strong> ${clean_string_for_html(decision + confidence)}` +
+                `</div>`
+            );
+
+            statusParts.push(
+                `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                    `<strong>Transition Evaluation:</strong> ${clean_string_for_html(reason)}` +
+                `</div>`
+            );
+
+            if (guidance) {
+                statusParts.push(
+                    `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                        `<strong>Transition Guidance:</strong> ${clean_string_for_html(guidance)}` +
+                    `</div>`
+                );
+            }
+        }
+
         if (objectiveRows.length) {
             statusParts.push(`<div class="aspect-destinia-diagnostic-objectives">${objectiveRows.join('')}</div>`);
         }
+
         if (statusParts.length) {
-            sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Status</strong></summary>${statusParts.join('')}</details>`);
+            sections.push(
+                `<details class="aspect-destinia-diagnostic-section" open>` +
+                    `<summary><strong>Status</strong></summary>` +
+                    `${statusParts.join('')}` +
+                `</details>`
+            );
         }
 
-        sections.push(`<details class="aspect-destinia-diagnostic-section" open><summary><strong>Controls</strong></summary><div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point"><strong>Plot Point:</strong> ${clean_string_for_html(liveCurrentPlot || 'None')}</div><div class="aspect-destinia-diagnostic-nav"><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button><button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button></div></details>`);
+        sections.push(
+            `<details class="aspect-destinia-diagnostic-section" open>` +
+                `<summary><strong>Controls</strong></summary>` +
+                `<div class="aspect-destinia-diagnostic-section aspect-destinia-diagnostic-plot-point">` +
+                    `<strong>Plot Point:</strong> ${clean_string_for_html(liveCurrentPlot || 'None')}` +
+                `</div>` +
+                `<div class="aspect-destinia-diagnostic-nav">` +
+                    `<button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="first">First</button>` +
+                    `<button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="previous">Previous</button>` +
+                    `<button type="button" class="menu_button aspect-destinia-diagnostic-nav-button" data-message-index="${i}" data-plot-action="next">Next</button>` +
+                `</div>` +
+            `</details>`
+        );
+
         rendered = sections.join('');
     }
 
     if (text) {
         rendered = messageFormatting(clean_string_for_html(rendered), null, false, false, -1);
     }
+
     const state_div = $(buildDiagnosticDrawerShell(rendered, isLoadingDiagnostic));
     const drawer = state_div.find('.aspect-destinia-diagnostic-drawer');
+
     if (isLoadingDiagnostic) {
         drawer.css('--aspect-destinia-diagnostic-progress', `${loadingProgress}%`);
     }
+
     if (isFinishingDiagnostic) {
         drawer.addClass('aspect-destinia-diagnostic-finishing');
     }
+
     bindDiagnosticDrawerToggle(state_div);
     message_element.after(state_div);
 }
+
 function update_all_message_visuals() {
     const chat = getContext().chat;
     const first_displayed_message_id = Number($('#chat').children('.mes').first().attr('mesid'));
@@ -4164,7 +4574,15 @@ function initialize_settings_listeners() {
     log("Initializing settings listeners")
 
     // Trigger profile changes
-    bind_setting('#profile', 'profile', 'text', () => load_profile(), false);
+    bind_setting('#profile', 'profile', 'text', () => {
+    load_profile();
+
+    syncTimelineTextFromSelectedPreset({
+        updateEditor: true,
+        refreshGuidanceNow: true,
+        refreshStatusNow: true,
+    });
+}, false);
     bind_function('#save_profile', () => save_profile(), false);
     bind_function('#rename_profile', () => rename_profile(), false)
     bind_function('#new_profile', new_profile, false);
@@ -4205,8 +4623,7 @@ function initialize_settings_listeners() {
     bind_setting('#detach_instruction', 'detach_instruction', 'text');
     initialize_connection_profile_dropdown();
     bind_setting('#evaluator_preset', 'evaluator_preset', 'text');
-    bind_setting('#timeline_text', 'timeline_text', 'text');
-    $(`.${settings_content_class} #timeline_text`).off('input.aspectDestiniaValidation change.aspectDestiniaValidation').on('input.aspectDestiniaValidation change.aspectDestiniaValidation', () => updateFieldValidationIndicators());
+    bindTimelineEditor();
     bind_setting('#guidance_intro', 'guidance_intro', 'text');
     bind_setting('#guidance_principles', 'guidance_principles', 'text');
     bind_setting('#current_plot_point_template', 'current_plot_point_template', 'text');
@@ -4240,16 +4657,13 @@ function initialize_settings_listeners() {
     bindTextAreaLauncher('#guidance_outro', 'guidance_outro', 'Guidance Outro');
     bindTextAreaLauncher('#evaluator_prompt', 'evaluator_prompt', 'Evaluator Prompt');
 
-    bind_setting('#timeline_preset', 'selected_timeline_preset', 'text', (presetId) => {
-        const presets = get_settings('timeline_presets') || {};
-        const preset = presets[presetId];
-        updateTimelinePresetControls();
-        if (preset?.timelineText) {
-            set_settings('timeline_text', preset.timelineText);
-            refresh_settings_for_timeline_controls();
-            refresh_guidance();
-        }
+bind_setting('#timeline_preset', 'selected_timeline_preset', 'text', () => {
+    syncTimelineTextFromSelectedPreset({
+        updateEditor: true,
+        refreshGuidanceNow: true,
+        refreshStatusNow: true,
     });
+});
     bind_function('#timeline_preset_create', () => createTimelinePreset(false), false);
     bind_function('#timeline_preset_save', saveSelectedTimelinePreset, false);
     bind_function('#timeline_preset_rename', renameSelectedTimelinePreset, false);
@@ -4391,6 +4805,15 @@ jQuery(async function () {
     // load settings html
     await load_settings_html();
 
+    // Timeline JSON is preset-owned, not profile-owned.
+    // After settings and HTML exist, mirror the selected timeline preset into timeline_text
+    // and the Timeline JSON editor field.
+    syncTimelineTextFromSelectedPreset({
+        updateEditor: true,
+        refreshGuidanceNow: false,
+        refreshStatusNow: false,
+    });
+
     // initialize UI stuff
     initialize_settings_listeners();
     initialize_slash_commands();
@@ -4402,10 +4825,9 @@ jQuery(async function () {
     let eventSource = ctx.eventSource;
     let event_types = ctx.event_types;
     eventSource.on(event_types.CONNECTION_PROFILE_LOADED, async () => {
-        await detect_connection_profiles_active();
-        apply_structural_settings_surfaces();
-        apply_common_settings_surfaces();
-    });
+    await apply_structural_settings_surfaces();
+    apply_common_settings_surfaces();
+});
     eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, (id) => on_chat_event('char_message', id));
     eventSource.on(event_types.USER_MESSAGE_RENDERED, (id) => on_chat_event('user_message', id));
     eventSource.on(event_types.GROUP_WRAPPER_FINISHED, () => {
@@ -4423,10 +4845,10 @@ jQuery(async function () {
     eventSource.on(event_types.MESSAGE_SWIPED, (id) => on_chat_event('message_swiped', id));
     eventSource.on(event_types.CHAT_CHANGED, () => on_chat_event('chat_changed'));
     eventSource.on(event_types.MORE_MESSAGES_LOADED, refresh_guidance)
-    eventSource.on(event_types.SETTINGS_UPDATED, () => {
-        apply_structural_settings_surfaces();
-        apply_common_settings_surfaces();
-    })  // refresh extension settings when ST settings change without forcing a full panel rewrite
+    eventSource.on(event_types.SETTINGS_UPDATED, async () => {
+    await apply_structural_settings_surfaces();
+    apply_common_settings_surfaces();
+});  // refresh extension settings when ST settings change without forcing a full panel rewrite
     eventSource.on(event_types.GENERATION_STARTED, (type, stuff, dry) => on_chat_event('before_message', {'type': type, 'dry': dry}))
 
 });
