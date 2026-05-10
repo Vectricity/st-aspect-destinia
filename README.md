@@ -1,5 +1,7 @@
 # Aspect: Destinia
 
+<img src="https://github.com/Vectricity/st-aspect-destinia/raw/assets/assets/thumbnail_destinia.png" alt="Thumbnail of Destinia" width="400">
+
 Aspect: Destinia is a SillyTavern extension for story progression. It lets you set up a timeline of plot points, keep each chat tied to its own place in that timeline, and guide the roleplay forward without having to manually steer the narrative.
 
 The extension is meant for people who want better continuity in long chats. It keeps track of where the story is, what still needs to happen in the current phase, and when it makes sense to stay put or move on. The goal is not to force the chat down one path, but to keep the story coherent and easier to manage over time.
